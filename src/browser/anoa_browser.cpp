@@ -240,6 +240,19 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     // option.
 }
 
+AnoaBrowser::~AnoaBrowser()
+{
+    // See the header: the views hold the pages, the pages hold the profile, and
+    // Qt's own child ordering gets it backwards. deleteLater is no good here —
+    // there is no event loop left to run it — so the views are deleted outright
+    // while the profiles they name are still valid objects.
+    for (Tab &tab : m_tabs) {
+        delete tab.view;
+        tab.view = nullptr;
+    }
+    m_tabs.clear();
+}
+
 void AnoaBrowser::acceptDownloadsOn(QWebEngineProfile *profile)
 {
     if (!profile || m_downloadWired.contains(profile))

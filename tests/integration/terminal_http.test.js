@@ -364,24 +364,23 @@ describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal against a fake /render/* endp
   }, 30000);
 });
 
-// THTTP-08 — G9, and a known failure.
+// THTTP-08 — G9.
 //
-// RenderHttpClient sets no SO_RCVTIMEO and no connect timeout, and since the
-// frame loop became a QTimer callback that blocking read() happens *on the Qt
-// event loop*. A peer that accepts the connection and then goes quiet
-// therefore wedges the whole viewer: the QSocketNotifier never fires again, so
-// Ctrl-C is never read; ISIG is off in raw mode, so ^C is not a signal either;
-// and SIGTERM only sets a flag that the (never-reached) frame tick polls. The
-// process survives everything short of SIGKILL, on a terminal left in raw mode
-// on the alt screen.
+// RenderHttpClient once set no SO_RCVTIMEO and no connect timeout, and since
+// the frame loop is a QTimer callback that blocking read() happened *on the Qt
+// event loop*. A peer that accepted the connection and then went quiet wedged
+// the whole viewer: the QSocketNotifier never fired again so Ctrl-C was never
+// read; ISIG is off in raw mode so ^C was not a signal either; and SIGTERM only
+// set a flag the never-reached frame tick polls. The process survived
+// everything short of SIGKILL, on a terminal left in raw mode on the alt
+// screen.
 //
-// This is filed as a bug rather than fixed here — phase 14 is testing, and the
-// fix is a socket-options change in the transport. `it.fails` is the honest
-// annotation: the case is committed and runs on every push, it passes today
-// *because* the viewer wedges, and the day a timeout lands it goes red and
-// this block gets deleted along with the bug.
+// This case was committed as `it.fails` — passing *because* the viewer wedged,
+// and written to go red the day a timeout landed. bug-003 landed it, and it
+// went red exactly as designed, which is why the annotation is gone. It is an
+// ordinary test now: the viewer must still answer Ctrl-C with a dead endpoint.
 describe.skipIf(!HAVE_UTIL_LINUX_SCRIPT)('terminal against a stalling /render/* endpoint', () => {
-  it.fails('stays interactive when the endpoint accepts and then sends nothing', async () => {
+  it('stays interactive when the endpoint accepts and then sends nothing', async () => {
     const port = await freePort();
     // stallAfter 1: the 8x8 pre-flight probe is answered, so the viewer starts
     // and takes the terminal; every frame request after it hangs.

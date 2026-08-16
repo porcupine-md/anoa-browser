@@ -118,20 +118,12 @@ jobs:
           retention-days: 7
 
   # ── 2. Integration Tests (Node.js + running binary) ───────────────────────
-  # DISABLED. Two cases have been failing on master since before the multi-tab
-  # branch, and the job has been red long enough that nobody reads it:
-  #
-  #   terminal_http.test.js > terminal against a stalling /render/* endpoint
-  #                         > stays interactive when the endpoint accepts and
-  #                           then sends nothing
-  #
-  # Everything else in the suite passes — 94 cases locally — so this is a gate
-  # switched off, not a suite abandoned. Run it by hand with:
-  #   cd tests/integration && ANOA_BINARY=... npx vitest run
-  # Flip `if` back to true once that case is fixed.
+  # Re-enabled. The case that switched this gate off — THTTP-08, the viewer
+  # against an endpoint that accepts and then goes quiet — was an `it.fails`
+  # written to go red the day the transport grew a timeout. bug-003 landed that
+  # timeout, the annotation went with it, and the case is ordinary now.
   integration-tests:
     name: Integration Tests
-    if: false
     runs-on: ubuntu-22.04
     needs: unit-tests
     timeout-minutes: 30
@@ -177,15 +169,11 @@ jobs:
         run: npx vitest run
 
   # ── 3. Shell Integration Tests ─────────────────────────────────────────────
-  # DISABLED, same reason as integration-tests above:
-  #
-  #   TERM-MODE-02a: exit 0, usage line
-  #
-  # Also red on master before this branch. Run by hand with:
-  #   ANOA_BINARY=./build/anoa bash tests/integration/port_layout.test.sh
+  # Re-enabled. TERM-MODE-02a asserted QCommandLineParser's own "[options]"
+  # usage line, which stopped existing when --help became the grouped help; it
+  # now asserts the help we actually print.
   shell-tests:
     name: Shell Integration Tests
-    if: false
     runs-on: ubuntu-22.04
     needs: unit-tests
     timeout-minutes: 30
@@ -271,10 +259,12 @@ jobs:
   e2e-tests:
     name: E2E Tests (Playwright / Puppeteer)
     runs-on: ubuntu-22.04
-    # Was `needs: integration-tests`. A skipped dependency skips its dependents,
-    # so leaving it there would have taken E2E — and the smoke suite behind it —
-    # down with the job above. They have in fact been skipped this whole time,
-    # because integration was always red.
+    # Deliberately on unit-tests, not integration-tests. It was moved here when
+    # integration was disabled — a skipped dependency skips its dependents, so
+    # E2E and the smoke suite behind it were being skipped too — and it stays
+    # here now that integration is back: the two suites share nothing but a
+    # built binary, so chaining them only means E2E waits, and a red integration
+    # run hides whether E2E passed. Parallel gives both answers every push.
     needs: unit-tests
     timeout-minutes: 30
 

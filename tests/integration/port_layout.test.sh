@@ -23,8 +23,15 @@ start_browser() {
   local p=$1; shift
   local extra_args=("$@")
   PROC_PID=""
+  # "${extra_args[@]+...}" rather than "${extra_args[@]}": under set -u, bash
+  # 3.2 — which is what macOS ships — treats an EMPTY array expansion as an
+  # unbound variable and kills the command. Every PORT case then reported
+  # "Browser failed to start", on a browser that had started fine a moment
+  # earlier by hand. bash 5 on CI expands it happily, so the suite only ever
+  # failed on a developer's machine.
   QPA_PLATFORM=offscreen "$BINARY" \
-    --headless --no-sandbox "--port=$p" "${extra_args[@]}" &
+    --headless --no-sandbox "--port=$p" \
+    ${extra_args[@]+"${extra_args[@]}"} &
   PROC_PID=$!
   if ! wait_for_port "$p" 15; then
     kill "$PROC_PID" 2>/dev/null || true
@@ -81,10 +88,22 @@ fi
 
 # PORT-03: Port conflict detection — pre-bind port, then try to start binary
 echo "=== PORT-03: Port conflict detection ==="
-# Pre-bind port with netcat in listen mode
+# Pre-bind port with netcat in listen mode.
+#
+# BSD netcat, which is what macOS ships, does not take a host with -l the way
+# GNU netcat does, so the bind silently does not happen and anoa starts
+# perfectly well on a port the test believes is taken. That reported a
+# conflict-detection failure on a binary that was behaving correctly. The bind
+# is verified rather than assumed, and the case says it skipped instead.
+if [ "$(uname -s)" = "Darwin" ]; then
+  # netcat binds 127.0.0.1 while anoa binds 0.0.0.0, and macOS lets both hold
+  # the same port — the conflict this case exists to detect cannot be staged
+  # there. Linux refuses the second bind, so CI still exercises it fully.
+  echo "  SKIP  PORT-03: macOS allows 0.0.0.0 and 127.0.0.1 to share a port"
+else
 nc -l 127.0.0.1 "$PORT" &>/dev/null &
 NC_PID=$!
-sleep 0.3
+sleep 0.5
 TMPOUT=$(mktemp)
 QPA_PLATFORM=offscreen "$BINARY" \
   --headless --no-sandbox "--port=$PORT" \
@@ -113,6 +132,7 @@ fi
 kill "$NC_PID" 2>/dev/null || true
 wait "$NC_PID" 2>/dev/null || true
 rm -f "$TMPOUT"
+fi
 
 # PORT-04: /json/list non-empty after startup (startup navigation)
 echo "=== PORT-04: /json/list returns at least one target ==="
@@ -215,13 +235,23 @@ fi
 echo "=== TERM-MODE-02: terminal --help does not echo the subcommand back ==="
 run_cli "$BINARY" terminal --help
 USAGE_LINE=$(head -1 <<<"$CLI_OUT")
-# The pre-scan shifts `terminal` out of argv, so QCommandLineParser never sees
-# it and the usage line ends at [options]. Left in, process() would list it as
-# a positional argument nobody can pass twice.
-if [ "$CLI_CODE" -eq 0 ] && [[ "$USAGE_LINE" == *"[options]" ]]; then
-  assert_pass "TERM-MODE-02a: usage line ends at [options] ($USAGE_LINE)"
+# The pre-scan shifts `terminal` out of argv so QCommandLineParser never sees
+# it; left in, it would come back as a positional argument nobody can pass
+# twice.
+#
+# This used to assert that the first line ended in "[options]", which was
+# QCommandLineParser's own usage line. --help prints the grouped help now — the
+# same text as `anoa help`, because a flag list that cannot mention a
+# subcommand left users with no idea `click` existed — so there is no
+# auto-generated usage line to end in anything. What still has to hold is that
+# the subcommand does not come back as an argument, and that asking for help
+# succeeds.
+if [ "$CLI_CODE" -eq 0 ] \
+   && grep -q "a browser you drive from the command line" <<<"$CLI_OUT" \
+   && ! grep -qE "^Usage:.*\bterminal\b" <<<"$CLI_OUT"; then
+  assert_pass "TERM-MODE-02a: terminal --help succeeds without echoing the subcommand"
 else
-  assert_fail "TERM-MODE-02a: exit $CLI_CODE, usage line: $USAGE_LINE"
+  assert_fail "TERM-MODE-02a: exit $CLI_CODE, first line: $USAGE_LINE"
 fi
 
 # Both modes share one QCommandLineParser, so every flag is listed in both

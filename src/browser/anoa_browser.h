@@ -38,6 +38,13 @@ class AnoaBrowser : public QWidget, public TabHost
 
 public:
     explicit AnoaBrowser(const Config &config, QWidget *parent = nullptr);
+    // Qt deletes children in construction order, and the default profile is
+    // built before any view exists — so plain destruction releases the profile
+    // while its pages are still alive. Qt says so out loud ("Release of profile
+    // requested but WebEnginePage still not deleted. Expect troubles !") and it
+    // lands on exactly the path that flushes cookies and session storage, which
+    // is the whole point of a persistent profile. The pages go first, by hand.
+    ~AnoaBrowser() override;
     void init();
 
     void loadExtensions(const QStringList &paths);
