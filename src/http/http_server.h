@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTcpServer>
 
 class AnoaBrowser;
@@ -18,6 +19,11 @@ public:
     bool start();
     void stop();
 
+    // Which origins may put the live view in an iframe. Empty is the default
+    // and means 'self' only — see frameAncestorsHeader() for why that is the
+    // default rather than the permissive thing.
+    void setEmbedOrigins(const QStringList &origins) { m_embedOrigins = origins; }
+
 private slots:
     void handleNewConnection();
 
@@ -32,6 +38,9 @@ private:
     // tab as a silent consolation, because a caller that named the wrong tab
     // has to find out.
     QWebEngineView *resolveRenderTab(const QUrlQuery &query, QString *badId) const;
+    // The Content-Security-Policy line for the viewer page, terminator
+    // included, or empty for no restriction at all.
+    QByteArray frameAncestorsHeader() const;
 
     QTcpServer *m_server;
     quint16 m_port;
@@ -39,4 +48,5 @@ private:
     quint16 m_proxyPort;
     QString m_authToken;
     AnoaBrowser *m_browser;
+    QStringList m_embedOrigins;
 };

@@ -530,3 +530,27 @@
 - DOM.requestNode answers out of a node map that does not exist until DOM.enable
   and one DOM.getDocument have run. Without them it fails with an EMPTY error
   message, which reads as "wrong element" rather than "domain asleep".
+
+## feat/embeddable-live-view (2026-08-16)
+
+- /render was a 500 ms PNG poller with no input and no tabs. It is now an MJPEG
+  live view with a tab bar, a URL bar and full mouse/keyboard forwarding, served
+  from a Qt resource rather than a C++ format string.
+- Found while wiring it: /render/stream.mjpeg called browser->grab(), which
+  grabs the container and therefore whatever tab is raised. ?tab= was resolved,
+  404'd correctly for a bad id, and then ignored. Streaming a background tab
+  gave you the active one with nothing anywhere to say so.
+- Input primitives that did not exist: mouse move, separate press/release, and
+  modifiers on anything. Without them there is no hover, no drag, no text
+  selection and no Ctrl+A — the click endpoint can drive a page from a script
+  but cannot be driven by a pointer.
+- HiDPI: grab() is device pixels, the input endpoints are logical pixels. Added
+  GET /render/viewport so a client never has to guess from the image.
+- Embedding is opt-in by origin (frame-ancestors 'self' by default,
+  --embed-origin to widen). The view forwards keystrokes, so framing it is
+  handing over the session, not showing a picture of one. Verified both ways by
+  screenshotting a cross-origin host page: blocked renders Chromium's broken-
+  document icon, allowed renders the viewer.
+- The old page substituted the server's auth token into the HTML, so every
+  authenticated GET /render returned a document with the secret in it. The new
+  page is static and reads the token from its own query string instead.

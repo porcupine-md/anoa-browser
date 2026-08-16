@@ -35,7 +35,7 @@ position survive between them, so commands chain with `&&` for free.
 
 - **A command per action, for agents** — `open`, `snapshot`, `click`, `fill`, `get`, `eval`, `wait`, `screenshot`. `snapshot` hands back refs (`@e1`, `@e2`) that later commands target, and clicks are hit-tested, so a button under a consent banner is reported rather than clicked through. `anoa help` groups them; `anoa skills get core` prints the workflow for an agent to read
 - **Speaks CDP** — connect Playwright, Puppeteer or any Chrome-compatible client, with Chrome-compatible discovery endpoints (`/json`, `/json/version`, `/json/list`) and a WebSocket proxy with session multiplexing and optional bearer-token auth
-- **Drive it over plain HTTP** — live viewer, PNG screenshots, MJPEG stream, navigation and click/scroll injection through `/render/*`, no CDP client required
+- **Drive it over plain HTTP** — an interactive live view you can drop in an `<iframe>`, PNG screenshots, MJPEG stream per tab, and full mouse/keyboard injection through `/render/*`, no CDP client required
 - **See it in your terminal** — `anoa terminal` renders the live page as ANSI or as real images in iTerm2/kitty, and forwards your clicks, scrolls and typing back to it. Point it at a running browser, at any external Chrome endpoint with `--cdp`, or at nothing at all and it hosts its own
 - **A window when you want one** — an address bar with back / forward / reload, and an auto-hiding toolbar that returns when the pointer reaches the top edge
 - **Works behind tunnels and proxies** — no Origin rejections, with `--auth-token` for access control
@@ -472,7 +472,8 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 
 | Method | Path | Response | Description |
 |---|---|---|---|
-| `GET` | `/render` | `text/html` | Live viewer page — auto-refreshing screenshot in the browser |
+| `GET` | `/render?tab=<id>&embed=1` | `text/html` | Live view — MJPEG stream you can click, type and drag in, with a tab bar and URL bar. `embed=1` drops the chrome for embedding; `tab=` picks the tab to drive |
+| `GET` | `/render/viewport?tab=<id>` | `application/json` | `{"width","height","dpr"}` — the logical size the input endpoints below speak. Not the frame's pixel size: frames are device pixels, so on a HiDPI display the image is `dpr`× wider than the coordinates that drive it |
 | `GET` | `/render/screenshot.png` | `image/png` | Current frame as a PNG snapshot; `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size |
 | `GET` | `/render/screenshot.ppm?w=<px>&h=<px>` | `image/x-portable-pixmap` | Current frame as binary PPM (P6), scaled server-side (aspect ratio kept); `X-Anoa-Viewport-Width/Height` headers carry the logical viewport size for coordinate mapping |
 | `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
@@ -480,8 +481,54 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 | `POST` | `/render/click?x=<px>&y=<px>&button=left\|right\|middle` | `text/plain` | Synthesize a mouse click at viewport coordinates (button defaults to `left`) |
 | `POST` | `/render/scroll?dy=<delta>&x=<px>&y=<px>` | `text/plain` | Synthesize a mouse wheel event; `dy` in angle-delta units (±120 per notch, positive scrolls up), `x`/`y` default to the viewport center |
 | `POST` | `/render/type?text=<text>` | `text/plain` | Type text into the focused element (URL-encoded query param, or raw request body) |
-| `POST` | `/render/key?key=<name>` | `text/plain` | Press a named key: `enter`, `tab`, `backspace`, `delete`, `escape`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown` |
-| `GET` | `/render/stream.mjpeg` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) |
+| `POST` | `/render/key?key=<name>&mods=<list>` | `text/plain` | Press a named key: `enter`, `tab`, `backspace`, `delete`, `escape`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `insert`, `f1`–`f12`, or a single character. `mods` is a comma-separated list of `ctrl`, `shift`, `alt`, `meta` — `key=a&mods=ctrl` is Select All |
+| `POST` | `/render/move?x=<px>&y=<px>&buttons=<list>&mods=<list>` | `text/plain` | Move the pointer. `buttons` names what is still held, which is what makes a move a drag rather than a hover |
+| `POST` | `/render/mousedown?x=<px>&y=<px>&button=<b>&mods=<list>` | `text/plain` | Press and hold |
+| `POST` | `/render/mouseup?x=<px>&y=<px>&button=<b>&mods=<list>` | `text/plain` | Release. A press and a release at one point is still a click |
+| `POST` | `/render/tab/new?url=<url>&name=<name>` | `application/json` | `{"id":"t3"}` |
+| `POST` | `/render/tab/close?tab=<id>` | `application/json` | Closes it; `409` for the last remaining tab |
+| `GET` | `/render/stream.mjpeg?tab=<id>` | `multipart/x-mixed-replace` | MJPEG live stream (~10 fps) of the named tab, or the active one |
+
+### Embedding the live view
+
+`/render` is a page you can put in an `<iframe>`. It streams the tab over MJPEG
+and forwards mouse and keyboard back, so the person looking at your app can use
+the browser — hover a menu, drag a selection, type into a form, press Ctrl+A —
+without leaving it.
+
+```html
+<iframe src="http://localhost:9222/render?embed=1&tab=t2&token=mysecret"
+        width="1280" height="720" style="border:0"></iframe>
+```
+
+- `embed=1` drops the tab bar and URL bar, leaving just the view. Omit it to get
+  the full viewer.
+- `tab=<id>` picks which tab this frame drives. Omit it to follow whichever tab
+  is active. Two frames on two tab ids drive two tabs at once — one can be the
+  agent's, one the user's.
+- `token=` is required when `--auth-token` is set. It stays in the frame's own
+  URL; the page is served verbatim and never has the server's token written
+  into it.
+- Click the view once before typing. Keyboard events only reach a focused
+  frame, and an iframe starts unfocused — the view says so until it has focus.
+
+**Who is allowed to frame it.** The view is not a picture of a browser, it is a
+handle on one. A page that can frame it can watch a logged-in session and act
+inside it. So the default is same-origin only, sent as
+`Content-Security-Policy: frame-ancestors 'self'`, and embedding elsewhere is
+opt-in:
+
+```bash
+./anoa --headless --port 9222 --embed-origin https://app.example.com
+```
+
+`--embed-origin` is repeatable. `--embed-origin '*'` removes the restriction
+altogether — the frame will load anywhere, which is worth doing only on a
+machine where that is already true of everything else.
+
+Note that the `/render/*` control endpoints have never carried an origin check
+of their own, and `--auth-token` is off by default. On a shared or untrusted
+machine, set a token.
 
 ### Usage example
 

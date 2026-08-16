@@ -1,0 +1,11 @@
+<!DOCTYPE RCC>
+<!--
+  The live-view page, compiled into the binary for the same reason the icon is:
+  anoa is shipped as a relocatable bundle and an AppImage, and a page looked up
+  by path is a page that is sometimes missing.
+-->
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file alias="viewer.html">viewer.html</file>
+  </qresource>
+</RCC>

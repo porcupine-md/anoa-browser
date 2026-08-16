@@ -169,6 +169,9 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     QCommandLineOption extensionOpt("extension", "Path to an unpacked extension directory (repeatable)", "path");
     QCommandLineOption authTokenOpt("auth-token", "Bearer token required for CDP WebSocket connections", "token");
     QCommandLineOption configOpt("config", "Path to JSON or INI config file", "file");
+    QCommandLineOption embedOriginOpt("embed-origin",
+        "Origin allowed to iframe the live view, e.g. https://app.example.com "
+        "(repeatable; \"*\" allows any, default is same-origin only)", "origin");
     QCommandLineOption widthOpt(QStringList{"width"}, "Browser viewport/window width in pixels (default 1280)", "width");
     QCommandLineOption heightOpt(QStringList{"height"}, "Browser viewport/window height in pixels (default 720)", "height");
 
@@ -191,6 +194,7 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     parser.addOption(profileNameOpt);
     parser.addOption(extensionOpt);
     parser.addOption(authTokenOpt);
+    parser.addOption(embedOriginOpt);
     parser.addOption(configOpt);
     parser.addOption(widthOpt);
     parser.addOption(heightOpt);
@@ -225,6 +229,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
         cfg.profileName = parser.value(profileNameOpt);
     if (parser.isSet(authTokenOpt))
         cfg.authToken = parser.value(authTokenOpt);
+    if (parser.isSet(embedOriginOpt))
+        cfg.embedOrigins = parser.values(embedOriginOpt);
 
     if (parser.isSet(widthOpt)) {
         bool ok = false;

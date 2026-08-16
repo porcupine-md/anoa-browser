@@ -50,6 +50,10 @@ set(SOURCES
 # found by path is an icon that is sometimes missing.
 qt_add_resources(SOURCES resources/icons/anoa.qrc)
 
+# The live-view page, same reasoning: served from memory, so it cannot go
+# missing when the binary is moved or run out of an AppImage.
+qt_add_resources(SOURCES resources/viewer/viewer.qrc)
+
 # Windows reads an executable's icon from a resource compiled into it. Listed
 # only there because .rc is meaningless to the other two toolchains.
 if(WIN32)

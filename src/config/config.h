@@ -18,6 +18,10 @@ struct Config {
     QString profileName;
     QStringList extensionPaths;
     QString authToken;
+    // Origins allowed to put the live view (/render) in an iframe. Empty means
+    // 'self' only, because the view forwards input as well as showing pixels —
+    // a page that can frame it can drive the browser. "*" opts out entirely.
+    QStringList embedOrigins;
     int width = 1280;
     int height = 720;
 

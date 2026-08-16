@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anoa Live View</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#111;color:#ddd;overflow:hidden;
+  font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+body{display:flex;flex-direction:column}
+#chrome{flex:0 0 auto;background:#1b1b1b;border-bottom:1px solid #000}
+body.embed #chrome{display:none}
+#tabs{display:flex;align-items:stretch;gap:1px;overflow-x:auto;scrollbar-width:thin}
+.tab{flex:0 1 190px;min-width:70px;display:flex;align-items:center;gap:6px;
+  padding:7px 10px;background:#232323;border:0;border-top:2px solid transparent;
+  color:#999;font:inherit;text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden}
+.tab:hover{background:#2b2b2b}
+.tab.on{background:#111;color:#fff;border-top-color:#4a9eff}
+.tab .t{flex:1;overflow:hidden;text-overflow:ellipsis}
+.tab .x{flex:0 0 auto;width:16px;height:16px;border-radius:3px;line-height:15px;
+  text-align:center;color:#777}
+.tab .x:hover{background:#444;color:#fff}
+#newtab{flex:0 0 auto;padding:0 12px;background:#1b1b1b;border:0;color:#888;
+  font:inherit;font-size:16px;cursor:pointer}
+#newtab:hover{color:#fff}
+#bar{display:flex;align-items:center;gap:6px;padding:6px 8px}
+#bar button{background:#2a2a2a;border:0;color:#bbb;font:inherit;padding:5px 9px;
+  border-radius:4px;cursor:pointer}
+#bar button:hover{background:#383838;color:#fff}
+#url{flex:1;background:#111;border:1px solid #333;border-radius:4px;color:#ddd;
+  font:inherit;padding:6px 9px;min-width:0}
+#url:focus{outline:0;border-color:#4a9eff}
+#stage{flex:1;position:relative;background:#000;overflow:hidden;min-height:0}
+#stage:focus{outline:0}
+#stage.live{cursor:default}
+#frame{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;
+  display:block;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+#note{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  color:#666;font-size:12px;pointer-events:none;text-align:center}
+#hint{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.72);color:#8a8a8a;
+  padding:3px 8px;border-radius:4px;font-size:11px;pointer-events:none;
+  opacity:0;transition:opacity .2s}
+#hint.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div id="chrome">
+  <div style="display:flex">
+    <div id="tabs"></div>
+    <button id="newtab" title="New tab">+</button>
+  </div>
+  <div id="bar">
+    <button id="back" title="Back">←</button>
+    <button id="fwd" title="Forward">→</button>
+    <button id="reload" title="Reload">⟳</button>
+    <input id="url" placeholder="Enter a URL and press Return" spellcheck="false">
+  </div>
+</div>
+
+<div id="stage" tabindex="0">
+  <img id="frame" alt="">
+  <div id="note">connecting…</div>
+  <div id="hint">click to give this view the keyboard</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var Q = new URLSearchParams(location.search);
+  var TOKEN = Q.get("token") || "";
+  var EMBED = Q.get("embed") === "1";
+  // Which tab this viewer shows. Empty means "whichever is active", resolved
+  // server-side per request — so an unparameterised embed follows the browser.
+  var TAB = Q.get("tab") || "";
+
+  if (EMBED) document.body.classList.add("embed");
+
+  var stage = document.getElementById("stage");
+  var frame = document.getElementById("frame");
+  var note = document.getElementById("note");
+  var hint = document.getElementById("hint");
+  var tabsEl = document.getElementById("tabs");
+  var urlEl = document.getElementById("url");
+
+  // The tab's logical viewport, which is the coordinate space every input
+  // endpoint speaks. It is NOT the frame's pixel size: grab() returns device
+  // pixels, so on a HiDPI display the image is twice the width the browser
+  // thinks it is, and clicks mapped through the image land at double the
+  // intended point.
+  var vw = 0, vh = 0;
+
+  function qs(extra) {
+    var p = new URLSearchParams();
+    if (TAB) p.set("tab", TAB);
+    if (TOKEN) p.set("token", TOKEN);
+    for (var k in extra) if (extra[k] !== undefined && extra[k] !== "") p.set(k, extra[k]);
+    return p.toString();
+  }
+
+  function post(path, extra) {
+    return fetch(path + "?" + qs(extra), { method: "POST" }).catch(function () {});
+  }
+
+  // ── the frame ────────────────────────────────────────────────────────────
+  function connect() {
+    note.textContent = "connecting…";
+    note.style.display = "";
+    // A cache-buster is what makes a re-connect actually re-open the stream
+    // rather than resume the aborted one from cache.
+    frame.src = "/render/stream.mjpeg?" + qs({ _t: Date.now() });
+  }
+
+  frame.addEventListener("load", function () { note.style.display = "none"; });
+  frame.addEventListener("error", function () {
+    note.textContent = "stream lost — retrying";
+    note.style.display = "";
+    setTimeout(connect, 1500);
+  });
+
+  function refreshViewport() {
+    return fetch("/render/viewport?" + qs()).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j) { vw = j.width; vh = j.height; }
+    }).catch(function () {});
+  }
+
+  // ── coordinates ──────────────────────────────────────────────────────────
+  // object-fit: contain letterboxes the frame inside the stage, so the drawn
+  // rectangle is not the element's rectangle and the offset has to come out
+  // before the scale does.
+  function toViewport(ev) {
+    if (!vw || !vh) return null;
+    var box = frame.getBoundingClientRect();
+    if (!box.width || !box.height) return null;
+    var scale = Math.min(box.width / vw, box.height / vh);
+    var dw = vw * scale, dh = vh * scale;
+    var ox = box.left + (box.width - dw) / 2;
+    var oy = box.top + (box.height - dh) / 2;
+    var x = (ev.clientX - ox) / scale;
+    var y = (ev.clientY - oy) / scale;
+    if (x < 0 || y < 0 || x >= vw || y >= vh) return null;
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+
+  var BUTTONS = ["left", "middle", "right"];
+  function buttonName(ev) { return BUTTONS[ev.button] || "left"; }
+
+  function heldNames(ev) {
+    var out = [];
+    if (ev.buttons & 1) out.push("left");
+    if (ev.buttons & 4) out.push("middle");
+    if (ev.buttons & 2) out.push("right");
+    return out.join(",");
+  }
+
+  function modNames(ev) {
+    var out = [];
+    if (ev.ctrlKey) out.push("ctrl");
+    if (ev.shiftKey) out.push("shift");
+    if (ev.altKey) out.push("alt");
+    if (ev.metaKey) out.push("meta");
+    return out.join(",");
+  }
+
+  // ── pointer ──────────────────────────────────────────────────────────────
+  stage.addEventListener("mousedown", function (ev) {
+    stage.focus();
+    var p = toViewport(ev);
+    if (!p) return;
+    ev.preventDefault();
+    post("/render/mousedown", { x: p.x, y: p.y, button: buttonName(ev), mods: modNames(ev) });
+  });
+
+  window.addEventListener("mouseup", function (ev) {
+    var p = toViewport(ev);
+    if (!p) return;
+    post("/render/mouseup", { x: p.x, y: p.y, button: buttonName(ev), mods: modNames(ev) });
+  });
+
+  // Moves are throttled to one in flight per frame budget. Unthrottled they
+  // outrun the server and queue up, and the pointer arrives late for the rest
+  // of the session.
+  var moveDue = null, moveTimer = 0;
+  function flushMove() {
+    moveTimer = 0;
+    if (!moveDue) return;
+    var m = moveDue; moveDue = null;
+    post("/render/move", m);
+  }
+  stage.addEventListener("mousemove", function (ev) {
+    var p = toViewport(ev);
+    if (!p) return;
+    moveDue = { x: p.x, y: p.y, buttons: heldNames(ev), mods: modNames(ev) };
+    if (!moveTimer) moveTimer = setTimeout(flushMove, 40);
+  });
+
+  stage.addEventListener("wheel", function (ev) {
+    var p = toViewport(ev);
+    if (!p) return;
+    ev.preventDefault();
+    // The endpoint takes Qt angle deltas: 120 units per notch, positive up,
+    // which is the opposite sign to the DOM's deltaY.
+    var dy = Math.round(-ev.deltaY * (ev.deltaMode === 1 ? 40 : 2));
+    if (!dy) dy = ev.deltaY > 0 ? -120 : 120;
+    post("/render/scroll", { x: p.x, y: p.y, dy: dy });
+  }, { passive: false });
+
+  // Right-click has to be swallowed here or the host page's menu opens on top
+  // of the page's own.
+  stage.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
+  stage.addEventListener("dragstart", function (ev) { ev.preventDefault(); });
+
+  // ── keyboard ─────────────────────────────────────────────────────────────
+  var NAMED = {
+    Enter: "enter", Tab: "tab", Backspace: "backspace", Delete: "delete",
+    Escape: "escape", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left",
+    ArrowRight: "right", Home: "home", End: "end", PageUp: "pageup",
+    PageDown: "pagedown", Insert: "insert"
+  };
+
+  stage.addEventListener("keydown", function (ev) {
+    var mods = modNames(ev);
+    var named = NAMED[ev.key];
+    if (!named && /^F([1-9]|1[0-2])$/.test(ev.key)) named = ev.key.toLowerCase();
+
+    if (named) {
+      ev.preventDefault();
+      post("/render/key", { key: named, mods: mods });
+      return;
+    }
+    if (ev.key.length !== 1) return; // Shift, Control, Dead keys and friends
+
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) {
+      // A shortcut. Ctrl+C and the rest have to reach the page as a key with
+      // modifiers, not as typed text.
+      ev.preventDefault();
+      post("/render/key", { key: ev.key, mods: mods });
+      return;
+    }
+    ev.preventDefault();
+    post("/render/type", { text: ev.key });
+  });
+
+  stage.addEventListener("paste", function (ev) {
+    var text = (ev.clipboardData || window.clipboardData).getData("text");
+    if (!text) return;
+    ev.preventDefault();
+    post("/render/type", { text: text });
+  });
+
+  // Keyboard only reaches a focused element, and an iframe starts unfocused —
+  // so without this the view looks interactive and silently swallows typing.
+  stage.addEventListener("focus", function () { hint.classList.remove("show"); });
+  stage.addEventListener("blur", function () { hint.classList.add("show"); });
+  if (document.activeElement !== stage) hint.classList.add("show");
+
+  // ── tabs ─────────────────────────────────────────────────────────────────
+  function selectTab(id) {
+    TAB = id;
+    var u = new URL(location.href);
+    u.searchParams.set("tab", id);
+    history.replaceState(null, "", u);
+    refreshViewport().then(connect);
+  }
+
+  function renderTabs(list) {
+    tabsEl.textContent = "";
+    list.forEach(function (t) {
+      var id = t.anoaTabId;
+      var b = document.createElement("button");
+      b.className = "tab" + (id === TAB || (!TAB && t.anoaActive) ? " on" : "");
+      b.title = (t.anoaTabName ? t.anoaTabName + " · " : "") + (t.url || "");
+
+      var label = document.createElement("span");
+      label.className = "t";
+      label.textContent = t.anoaTabName || t.title || t.url || id;
+      b.appendChild(label);
+
+      if (list.length > 1) {
+        var x = document.createElement("span");
+        x.className = "x";
+        x.textContent = "×";
+        x.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          fetch("/render/tab/close?" + new URLSearchParams(
+            TOKEN ? { tab: id, token: TOKEN } : { tab: id }
+          ), { method: "POST" }).then(pollTabs);
+        });
+        b.appendChild(x);
+      }
+
+      b.addEventListener("click", function () { selectTab(id); });
+      tabsEl.appendChild(b);
+    });
+  }
+
+  function pollTabs() {
+    if (EMBED) return Promise.resolve();
+    return fetch("/json/list" + (TOKEN ? "?token=" + encodeURIComponent(TOKEN) : ""))
+      .then(function (r) { return r.json(); })
+      .then(function (list) {
+        list = list.filter(function (t) { return t.anoaTabId; });
+        if (!list.length) return;
+        renderTabs(list);
+        var shown = list.filter(function (t) {
+          return TAB ? t.anoaTabId === TAB : t.anoaActive;
+        })[0];
+        if (shown && document.activeElement !== urlEl) urlEl.value = shown.url || "";
+      })
+      .catch(function () {});
+  }
+
+  document.getElementById("newtab").addEventListener("click", function () {
+    fetch("/render/tab/new?" + (TOKEN ? "token=" + encodeURIComponent(TOKEN) : ""),
+          { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j && j.id) selectTab(j.id); })
+      .then(pollTabs)
+      .catch(function () {});
+  });
+
+  // ── navigation ───────────────────────────────────────────────────────────
+  urlEl.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter") return;
+    ev.stopPropagation();
+    var v = urlEl.value.trim();
+    if (!v) return;
+    post("/render/navigate", { url: v }).then(pollTabs);
+  });
+
+  document.getElementById("back").addEventListener("click", function () {
+    post("/render/back").then(pollTabs);
+  });
+  document.getElementById("fwd").addEventListener("click", function () {
+    post("/render/forward").then(pollTabs);
+  });
+  document.getElementById("reload").addEventListener("click", function () {
+    post("/render/reload").then(pollTabs);
+  });
+
+  // ── go ───────────────────────────────────────────────────────────────────
+  refreshViewport().then(connect);
+  pollTabs();
+  setInterval(pollTabs, 2000);
+  // The tab can be resized under us (--width/--height, or a window drag), and
+  // a stale viewport silently mis-maps every click from then on.
+  setInterval(refreshViewport, 5000);
+  window.addEventListener("resize", refreshViewport);
+})();
+</script>
+</body>
+</html>

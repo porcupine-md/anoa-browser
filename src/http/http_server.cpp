@@ -21,6 +21,8 @@
 #include <QNetworkRequest>
 #include <QPixmap>
 #include <QTcpSocket>
+#include <QFile>
+#include <QPointer>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -148,6 +150,68 @@ QByteArray HttpServer::rebuildTargetList(const QByteArray &rewritten,
     }
 
     return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
+
+// `?mods=ctrl,shift` — comma-separated, order-free, unknown names ignored so a
+// client that learns a new modifier before this server does degrades to sending
+// the event unmodified rather than losing it to a 400.
+static Qt::KeyboardModifiers parseModifiers(const QString &spec)
+{
+    Qt::KeyboardModifiers mods = Qt::NoModifier;
+    const QStringList parts = spec.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString &raw : parts) {
+        const QString name = raw.trimmed().toLower();
+        if (name == QLatin1String("ctrl") || name == QLatin1String("control"))
+            mods |= Qt::ControlModifier;
+        else if (name == QLatin1String("shift"))
+            mods |= Qt::ShiftModifier;
+        else if (name == QLatin1String("alt"))
+            mods |= Qt::AltModifier;
+        else if (name == QLatin1String("meta") || name == QLatin1String("cmd"))
+            mods |= Qt::MetaModifier;
+    }
+    return mods;
+}
+
+// Shared by click and the three pointer endpoints, so "right" means the same
+// button everywhere. Returns false for a name none of them accept.
+static bool parseButton(const QString &spec, Qt::MouseButton *out)
+{
+    const QString name = spec.toLower();
+    if (name.isEmpty() || name == QLatin1String("left"))
+        *out = Qt::LeftButton;
+    else if (name == QLatin1String("right"))
+        *out = Qt::RightButton;
+    else if (name == QLatin1String("middle"))
+        *out = Qt::MiddleButton;
+    else
+        return false;
+    return true;
+}
+
+QByteArray HttpServer::frameAncestorsHeader() const
+{
+    // The live view is not a picture of a browser, it is a handle on one: it
+    // streams the screen and it forwards clicks and keystrokes. A page that can
+    // frame it can read a logged-in session and act inside it, invisibly, from
+    // any site the user happens to be visiting. The control endpoints have
+    // always been reachable cross-origin, but blind — framing is what turns
+    // that into a session someone can see and steer.
+    //
+    // So the default is 'self': the viewer frames itself and nothing else does,
+    // and embedding somewhere real is one flag away. A refused frame says so in
+    // the console, which is a better way to find out than never finding out.
+    if (m_embedOrigins.contains(QStringLiteral("*")))
+        return QByteArray();
+
+    QByteArray value = "'self'";
+    for (const QString &origin : m_embedOrigins) {
+        const QString trimmed = origin.trimmed();
+        if (trimmed.isEmpty())
+            continue;
+        value += " " + trimmed.toUtf8();
+    }
+    return "Content-Security-Policy: frame-ancestors " + value + "\r\n";
 }
 
 QWebEngineView *HttpServer::resolveRenderTab(const QUrlQuery &query, QString *badId) const
@@ -443,47 +507,74 @@ void HttpServer::handleNewConnection()
         }
         sendResponse(socket, 200, "OK", "ok", "text/plain");
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render")) {
-        QString screenshotUrl = QStringLiteral("/render/screenshot.png");
-        if (!m_authToken.isEmpty()) {
-            QUrlQuery screenshotQuery;
-            screenshotQuery.addQueryItem(QStringLiteral("token"), m_authToken);
-            screenshotUrl += QStringLiteral("?") + screenshotQuery.toString(QUrl::FullyEncoded);
+        // The page used to be a two-line poller built here as a format string.
+        // It is now a real viewer — tabs, a URL bar and every input event —
+        // which is more markup than belongs in a C++ literal, so it lives in
+        // the resource bundle and is served verbatim. The token and the tab
+        // travel in the query string the client already has, so nothing has to
+        // be substituted on the way out.
+        QFile page(QStringLiteral(":/viewer.html"));
+        if (!page.open(QIODevice::ReadOnly)) {
+            sendResponse(socket, 500, "Internal Server Error", "viewer missing", "text/plain");
+            return;
         }
-
-        static const char htmlTmpl[] = R"(<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Anoa Live View</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#000;overflow:hidden}
-#frame{display:block;width:100%;height:100%;object-fit:contain}
-</style>
-</head>
-<body>
-<img id="frame">
-<script>
-var src="%1";
-var img=document.getElementById("frame");
-function refresh(){img.src=src+(src.indexOf("?")>=0?"&":"?")+"_t="+Date.now();}
-refresh();
-setInterval(refresh,500);
-</script>
-</body>
-</html>)";
-
-        QByteArray htmlBytes = QString::fromUtf8(htmlTmpl).arg(screenshotUrl).toUtf8();
+        const QByteArray htmlBytes = page.readAll();
         QByteArray response =
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
-            "Cache-Control: no-cache\r\n"
+            "Cache-Control: no-cache\r\n";
+        response += frameAncestorsHeader();
+        response +=
             "Content-Length: " + QByteArray::number(htmlBytes.size()) + "\r\n"
             "Connection: close\r\n"
             "\r\n";
         response += htmlBytes;
         socket->write(response);
         closeWhenSent(socket);
+    } else if (method == QLatin1String("GET") && path == QLatin1String("/render/viewport")) {
+        // The logical size of the tab, which is the coordinate space every
+        // input endpoint speaks. A client cannot infer it from the frame:
+        // grab() returns device pixels, so on a HiDPI display the image is
+        // twice as wide as the coordinates that drive it.
+        if (!renderView) {
+            sendResponse(socket, 503, "Service Unavailable", R"({"error":"no browser"})");
+            return;
+        }
+        QJsonObject obj;
+        obj[QStringLiteral("width")] = renderView->width();
+        obj[QStringLiteral("height")] = renderView->height();
+        obj[QStringLiteral("dpr")] = renderView->devicePixelRatioF();
+        sendResponse(socket, 200, "OK", QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/tab/new")) {
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", R"({"error":"no browser"})");
+            return;
+        }
+        const QString target = query.queryItemValue(QStringLiteral("url"), QUrl::FullyDecoded);
+        const QString wanted = query.queryItemValue(QStringLiteral("name"));
+        const QString id = m_browser->newTab(target.isEmpty() ? QUrl() : QUrl(target),
+                                             QString(), false, wanted);
+        if (id.isEmpty()) {
+            sendResponse(socket, 400, "Bad Request", R"({"error":"could not open tab"})");
+            return;
+        }
+        QJsonObject obj;
+        obj[QStringLiteral("id")] = id;
+        sendResponse(socket, 200, "OK", QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    } else if (method == QLatin1String("POST") && path == QLatin1String("/render/tab/close")) {
+        // The tab was already resolved and 404'd above if it does not exist, so
+        // reaching here with an empty id means no ?tab= was given at all.
+        if (!m_browser || renderTabId.isEmpty()) {
+            sendResponse(socket, 400, "Bad Request", R"({"error":"tab required"})");
+            return;
+        }
+        // Refuses the last tab, by the same rule the CLI follows: one process
+        // still means at least one page.
+        if (!m_browser->closeTab(renderTabId)) {
+            sendResponse(socket, 409, "Conflict", R"({"error":"cannot close the last tab"})");
+            return;
+        }
+        sendResponse(socket, 200, "OK", R"({"closed":true})");
     } else if (method == QLatin1String("GET")
                && path == QLatin1String("/render/screenshot.ppm")) {
         // Binary PPM (P6) frame, optionally scaled server-side via ?w=&h=.
@@ -538,13 +629,8 @@ setInterval(refresh,500);
             return;
         }
 
-        QString buttonStr = query.queryItemValue(QStringLiteral("button")).toLower();
         Qt::MouseButton button = Qt::LeftButton;
-        if (buttonStr == QLatin1String("right"))
-            button = Qt::RightButton;
-        else if (buttonStr == QLatin1String("middle"))
-            button = Qt::MiddleButton;
-        else if (!buttonStr.isEmpty() && buttonStr != QLatin1String("left")) {
+        if (!parseButton(query.queryItemValue(QStringLiteral("button")), &button)) {
             sendResponse(socket, 400, "Bad Request", "invalid button", "text/plain");
             return;
         }
@@ -554,8 +640,60 @@ setInterval(refresh,500);
             return;
         }
 
-        m_browser->sendClick(QPoint(x, y), button, renderTabId);
+        m_browser->sendClick(QPoint(x, y), button, renderTabId,
+                             parseModifiers(query.queryItemValue(QStringLiteral("mods"))));
         sendResponse(socket, 200, "OK", "clicked", "text/plain");
+    } else if (method == QLatin1String("POST")
+               && (path == QLatin1String("/render/move")
+                   || path == QLatin1String("/render/mousedown")
+                   || path == QLatin1String("/render/mouseup"))) {
+        // Press, move and release as separate events. A click endpoint can
+        // drive a page from a script; it cannot hover a menu open or drag a
+        // selection across one, because both of those are a state that spans
+        // more than one event.
+        bool okX = false, okY = false;
+        const int x = query.queryItemValue(QStringLiteral("x")).toInt(&okX);
+        const int y = query.queryItemValue(QStringLiteral("y")).toInt(&okY);
+        if (!okX || !okY || x < 0 || y < 0) {
+            sendResponse(socket, 400, "Bad Request", "invalid coordinates", "text/plain");
+            return;
+        }
+
+        Qt::MouseButton button = Qt::LeftButton;
+        if (!parseButton(query.queryItemValue(QStringLiteral("button")), &button)) {
+            sendResponse(socket, 400, "Bad Request", "invalid button", "text/plain");
+            return;
+        }
+
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", "no browser", "text/plain");
+            return;
+        }
+
+        const Qt::KeyboardModifiers mods =
+            parseModifiers(query.queryItemValue(QStringLiteral("mods")));
+        const QPoint pos(x, y);
+
+        if (path == QLatin1String("/render/mousedown")) {
+            m_browser->sendMouseDown(pos, button, mods, renderTabId);
+            sendResponse(socket, 200, "OK", "pressed", "text/plain");
+        } else if (path == QLatin1String("/render/mouseup")) {
+            m_browser->sendMouseUp(pos, button, mods, renderTabId);
+            sendResponse(socket, 200, "OK", "released", "text/plain");
+        } else {
+            // `?buttons=` is what is still held during the move, which is what
+            // separates a drag from a hover. Absent means nothing is down.
+            Qt::MouseButtons held = Qt::NoButton;
+            const QString heldSpec = query.queryItemValue(QStringLiteral("buttons"));
+            const QStringList heldNames = heldSpec.split(QLatin1Char(','), Qt::SkipEmptyParts);
+            for (const QString &name : heldNames) {
+                Qt::MouseButton b = Qt::LeftButton;
+                if (parseButton(name.trimmed(), &b))
+                    held |= b;
+            }
+            m_browser->sendMouseMove(pos, held, mods, renderTabId);
+            sendResponse(socket, 200, "OK", "moved", "text/plain");
+        }
     } else if (method == QLatin1String("POST") && path == QLatin1String("/render/scroll")) {
         bool okDy = false;
         int dy = query.queryItemValue(QStringLiteral("dy")).toInt(&okDy);
@@ -618,7 +756,8 @@ setInterval(refresh,500);
             return;
         }
 
-        if (!m_browser->sendKey(keyName, renderTabId)) {
+        if (!m_browser->sendKey(keyName, renderTabId,
+                                parseModifiers(query.queryItemValue(QStringLiteral("mods"))))) {
             sendResponse(socket, 400, "Bad Request", "unknown key", "text/plain");
             return;
         }
@@ -640,15 +779,20 @@ setInterval(refresh,500);
         QTimer *frameTimer = new QTimer(socket);
         frameTimer->setInterval(100);
 
-        AnoaBrowser *browser = m_browser;
-        connect(frameTimer, &QTimer::timeout, socket, [browser, socket]() {
+        // The tab resolved for this request, not the container. Grabbing the
+        // container gives whatever is raised, so `?tab=` was accepted and then
+        // ignored: asking for a background tab streamed the active one, with
+        // nothing anywhere to say so. Held as a QPointer because the stream
+        // outlives the request and a tab can be closed while it runs.
+        QPointer<QWebEngineView> streamView(renderView);
+        connect(frameTimer, &QTimer::timeout, socket, [streamView, socket]() {
             // Skip this frame if the write buffer is backed up beyond 512 KB.
             if (socket->bytesToWrite() > 512 * 1024)
                 return;
-            if (!browser)
+            if (!streamView)
                 return;
 
-            QPixmap pixmap = browser->grab();
+            QPixmap pixmap = streamView->grab();
             if (pixmap.isNull())
                 return;
 

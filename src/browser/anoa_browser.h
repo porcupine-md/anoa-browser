@@ -104,10 +104,29 @@ public:
 
     // An empty tabId means the active tab, which is what every caller that
     // has never heard of tabs passes.
-    void sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId = QString());
+    // Modifiers are appended rather than inserted so every existing call site
+    // keeps compiling and keeps meaning what it meant.
+    void sendClick(const QPoint &pos, Qt::MouseButton button, const QString &tabId = QString(),
+                   Qt::KeyboardModifiers mods = Qt::NoModifier);
     void sendScroll(const QPoint &pos, int angleDeltaY, const QString &tabId = QString());
     void sendText(const QString &text, const QString &tabId = QString());
-    bool sendKey(const QString &keyName, const QString &tabId = QString());
+    bool sendKey(const QString &keyName, const QString &tabId = QString(),
+                 Qt::KeyboardModifiers mods = Qt::NoModifier);
+
+    // A click is a press and a release at one point, which is enough to drive a
+    // page from a script and not enough to drive one with a pointer. Hover
+    // state is what opens a menu; a press held across moves is what selecting
+    // text and dragging an element are. The live view needs all three as
+    // separate events, so they are separate here.
+    void sendMouseMove(const QPoint &pos, Qt::MouseButtons heldButtons = Qt::NoButton,
+                       Qt::KeyboardModifiers mods = Qt::NoModifier,
+                       const QString &tabId = QString());
+    void sendMouseDown(const QPoint &pos, Qt::MouseButton button,
+                       Qt::KeyboardModifiers mods = Qt::NoModifier,
+                       const QString &tabId = QString());
+    void sendMouseUp(const QPoint &pos, Qt::MouseButton button,
+                     Qt::KeyboardModifiers mods = Qt::NoModifier,
+                     const QString &tabId = QString());
 
 signals:
     void downloadFinished(const QString &path, bool ok);

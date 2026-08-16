@@ -99,6 +99,21 @@ tests/
 
 ## Known Gotchas
 
+- **A frame is device pixels; every input endpoint is logical pixels.**
+  `QWidget::grab()` returns a pixmap at the display's devicePixelRatio, so on a
+  HiDPI screen `/render/screenshot.png` and `/render/stream.mjpeg` are twice the
+  width of the coordinate space `/render/click` and friends speak. A client that
+  maps a click through the image it was given lands at double the intended
+  point, on a page that looks like it just ignored the click. `GET
+  /render/viewport` exists to answer this and the `X-Anoa-Viewport-*` headers
+  carry the same numbers — use one of them, never the image's own dimensions.
+
+- **Grabbing the container is not grabbing a tab.** `AnoaBrowser` is a container
+  whose active view is raised, so `browser->grab()` returns whatever is on top,
+  regardless of the `?tab=` that was resolved for the request. The MJPEG stream
+  did exactly this and so accepted `?tab=` and silently ignored it. Grab the
+  view `resolveRenderTab()` returned.
+
 - **Never tag a release without running the Release workflow on
   `workflow_dispatch` first.** It builds and smoke-tests every package and
   publishes nothing, so a broken package is caught before it reaches anyone.

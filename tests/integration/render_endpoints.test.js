@@ -138,10 +138,18 @@ describe('Render endpoints (no auth)', () => {
     expect(resp.headers.get('content-type')).toMatch(/text\/html/);
   });
 
-  // RND-17
-  it('GET /render page body references /render/screenshot.png', async () => {
+  // RND-17. The page polled a PNG every 500 ms when it was a picture of a
+  // browser. It is a live view now, so it opens the MJPEG stream instead.
+  it('GET /render page body opens the MJPEG stream', async () => {
     const body = await fetch(`${BASE_URL}/render`).then(r => r.text());
-    expect(body).toContain('/render/screenshot.png');
+    expect(body).toContain('/render/stream.mjpeg');
+  });
+
+  // RND-17b — the view forwards input, so a page that can frame it can drive
+  // the browser. Same-origin only unless an origin is named on the command line.
+  it('GET /render restricts framing to same-origin by default', async () => {
+    const resp = await fetch(`${BASE_URL}/render`);
+    expect(resp.headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
   });
 
   // RND-19
@@ -254,13 +262,18 @@ describe('Render endpoints (with auth token)', () => {
     expect(resp.status).toBe(401);
   });
 
-  // RND-18
-  it('GET /render with auth configured embeds token in screenshot URL', async () => {
+  // RND-18. The page used to have the server's token substituted into it, so
+  // every authenticated fetch of /render returned a document with the secret
+  // written in it. It is served verbatim now and the viewer reads the token
+  // from its own query string, which is the one the client already holds —
+  // so the token must NOT appear in the body.
+  it('GET /render does not write the auth token into the page', async () => {
     const resp = await fetch(`${BASE_URL}/render`, {
       headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
     });
     const body = await resp.text();
-    expect(body).toContain(`token=${AUTH_TOKEN}`);
+    expect(resp.status).toBe(200);
+    expect(body).not.toContain(AUTH_TOKEN);
   });
 });
 

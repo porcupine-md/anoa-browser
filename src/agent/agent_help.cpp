@@ -29,6 +29,8 @@ const Group kGroups[] = {
     --profile-dir <dir>             where profiles live
     --extension <path>              load an unpacked extension (repeatable)
     --auth-token <secret>           require this bearer token on CDP
+    --embed-origin <origin>         let this origin iframe the live view at
+                                    /render (repeatable; default same-origin)
     --config <file>                 JSON or INI file of the above
     -v, --version                   print the version and exit
 

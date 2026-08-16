@@ -341,6 +341,7 @@ int main(int argc, char *argv[])
     const auto wsPort    = static_cast<quint16>(config.port + 2);
 
     HttpServer httpServer(httpPort, debugPort, wsPort, config.authToken, &browser, &app);
+    httpServer.setEmbedOrigins(config.embedOrigins);
     if (!httpServer.start()) {
         qCritical("Failed to bind HTTP server to port %u (already in use?)", httpPort);
         return 1;
