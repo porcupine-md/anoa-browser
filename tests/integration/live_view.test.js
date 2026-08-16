@@ -276,3 +276,56 @@ describe('Live view — who may frame it', () => {
     }
   }, 20000);
 });
+
+describe('Live view — reading the tab list from the host page', () => {
+  const HOST = 'http://127.0.0.1:8080';
+  let proc;
+
+  beforeAll(async () => {
+    proc = await startBrowser(['--embed-origin', HOST]);
+  }, 20000);
+  afterAll(() => stopBrowser(proc));
+
+  // LV-15 — an origin trusted to embed the view and drive the browser through
+  // it, but not to read /json/list, can show the view and cannot draw a tab bar
+  // around it. That is most of what embedding is for, so the two travel
+  // together.
+  it('answers an allowed origin with its own origin echoed back', async () => {
+    const resp = await fetch(`${BASE_URL}/json/list`, { headers: { Origin: HOST } });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get('access-control-allow-origin')).toBe(HOST);
+    // Or a cache hands one origin's answer to another.
+    expect(resp.headers.get('vary')).toBe('Origin');
+  });
+
+  // LV-16
+  it('says nothing to an origin that was never named', async () => {
+    const resp = await fetch(`${BASE_URL}/json/list`,
+                             { headers: { Origin: 'https://elsewhere.example' } });
+    expect(resp.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  // LV-17
+  it('answers a preflight, which carries no credentials of its own', async () => {
+    const resp = await fetch(`${BASE_URL}/render/tab/new`,
+                             { method: 'OPTIONS', headers: { Origin: HOST } });
+    expect(resp.status).toBe(204);
+    expect(resp.headers.get('access-control-allow-methods')).toContain('POST');
+  });
+});
+
+describe('Live view — CORS stays off until asked for', () => {
+  let proc;
+
+  beforeAll(async () => { proc = await startBrowser(); }, 20000);
+  afterAll(() => stopBrowser(proc));
+
+  // LV-18 — the default configuration answers exactly as it did before this
+  // existed, for every origin.
+  it('sends no CORS headers when no origin was configured', async () => {
+    const resp = await fetch(`${BASE_URL}/json/list`,
+                             { headers: { Origin: 'http://127.0.0.1:8080' } });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});

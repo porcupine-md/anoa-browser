@@ -75,13 +75,29 @@ static void closeWhenSent(QTcpSocket *socket)
     socket->disconnectFromHost();
 }
 
+// The CORS lines for this connection, decided once when the request is parsed
+// and carried on the socket itself.
+//
+// A dynamic property rather than an argument threaded through every call site,
+// and rather than a member: several handlers answer asynchronously, long after
+// the request that set it has returned, so the value has to belong to the
+// connection and not to the server.
+static const char *kCorsProperty = "anoaCors";
+
+static QByteArray corsFor(QTcpSocket *socket)
+{
+    return socket ? socket->property(kCorsProperty).toByteArray() : QByteArray();
+}
+
 static void sendResponse(QTcpSocket *socket, int statusCode, const QByteArray &statusText,
                          const QByteArray &body,
                          const QByteArray &contentType = "application/json")
 {
     QByteArray response =
         "HTTP/1.1 " + QByteArray::number(statusCode) + " " + statusText + "\r\n"
-        "Content-Type: " + contentType + "\r\n"
+        "Content-Type: " + contentType + "\r\n";
+    response += corsFor(socket);
+    response +=
         "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
         "Connection: close\r\n"
         "\r\n" + body;
@@ -189,6 +205,32 @@ static bool parseButton(const QString &spec, Qt::MouseButton *out)
     return true;
 }
 
+QByteArray HttpServer::corsHeadersFor(const QString &origin) const
+{
+    // Same list as framing, and for the same reason: --embed-origin says an
+    // origin is trusted to embed the view and drive the browser through it. An
+    // origin trusted with that but not allowed to read /json/list can show the
+    // view and cannot draw a tab bar around it, which is most of what embedding
+    // is for. Nothing is opened up that framing had not already opened.
+    //
+    // Silence unless an origin was named, so the default configuration answers
+    // exactly as it did before.
+    if (origin.isEmpty() || m_embedOrigins.isEmpty())
+        return QByteArray();
+
+    const bool any = m_embedOrigins.contains(QStringLiteral("*"));
+    if (!any && !m_embedOrigins.contains(origin))
+        return QByteArray();
+
+    // The caller's own origin is echoed rather than "*", so a future credentialed
+    // request does not have to be rewritten. Vary: Origin keeps a cache from
+    // handing one origin's answer to another.
+    return "Access-Control-Allow-Origin: " + origin.toUtf8() + "\r\n"
+           "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+           "Access-Control-Allow-Headers: Authorization, Content-Type\r\n"
+           "Vary: Origin\r\n";
+}
+
 QByteArray HttpServer::frameAncestorsHeader() const
 {
     // The live view is not a picture of a browser, it is a handle on one: it
@@ -278,6 +320,21 @@ void HttpServer::handleNewConnection()
     QUrlQuery query(url.query());
     QString hostHeader = headers.value(QStringLiteral("host"),
                                        QStringLiteral("127.0.0.1:%1").arg(m_port));
+
+    // Decided before anything can answer, and carried on the connection, so the
+    // handlers that reply asynchronously still send it.
+    socket->setProperty(kCorsProperty,
+                        corsHeadersFor(headers.value(QStringLiteral("origin"))));
+
+    // A preflight is asked before the request it is about, so it cannot be
+    // behind the auth check — the browser sends no credentials with it, and
+    // answering 401 here fails the actual request with a CORS error that names
+    // no cause. An origin we do not allow gets no CORS lines and the browser
+    // stops it on its own, which is the correct outcome and a clear one.
+    if (method == QLatin1String("OPTIONS")) {
+        sendResponse(socket, 204, "No Content", QByteArray(), "text/plain");
+        return;
+    }
 
     if (!m_authToken.isEmpty()) {
         QString authHeader = headers.value(QStringLiteral("authorization"));

@@ -526,6 +526,16 @@ opt-in:
 altogether — the frame will load anywhere, which is worth doing only on a
 machine where that is already true of everything else.
 
+A named origin may also **read** the JSON endpoints — `Access-Control-Allow-Origin`
+echoes it back — so the host page can call `/json/list` and draw its own tab bar
+around the frame instead of using the one the viewer ships. Nothing is opened up
+that framing had not already opened: an origin trusted to drive the browser but
+not to list its tabs can show the view and not build anything around it. With no
+`--embed-origin` set, no CORS headers are sent at all.
+
+A worked example — host page, its own tab bar, new-tab button — is in
+[`examples/embed/`](examples/embed/).
+
 Note that the `/render/*` control endpoints have never carried an origin check
 of their own, and `--auth-token` is off by default. On a shared or untrusted
 machine, set a token.

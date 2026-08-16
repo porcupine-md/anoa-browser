@@ -41,6 +41,9 @@ private:
     // The Content-Security-Policy line for the viewer page, terminator
     // included, or empty for no restriction at all.
     QByteArray frameAncestorsHeader() const;
+    // The Access-Control-* lines for a request from this Origin, or empty when
+    // the origin was never named by --embed-origin.
+    QByteArray corsHeadersFor(const QString &origin) const;
 
     QTcpServer *m_server;
     quint16 m_port;

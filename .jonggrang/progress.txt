@@ -554,3 +554,11 @@
 - The old page substituted the server's auth token into the HTML, so every
   authenticated GET /render returned a document with the secret in it. The new
   page is static and reads the token from its own query string instead.
+- Menulis contoh embed (examples/embed/) langsung membongkar celah yang tak
+  terlihat dari uji endpoint: --embed-origin mengizinkan sebuah origin
+  menyematkan DAN mengemudikan browser, tapi fetch ke /json/list tetap ditolak
+  karena tak ada header CORS. Jadi aplikasi tuan rumah bisa menampilkan view dan
+  tidak bisa menggambar bilah tab di sekelilingnya — yang justru sebagian besar
+  alasan orang menyematkannya. CORS kini memakai daftar origin yang sama.
+  Pelajarannya: menulis contoh yang benar-benar dijalankan menemukan hal yang
+  tidak ditemukan suite endpoint, karena suite memanggil server tanpa origin.

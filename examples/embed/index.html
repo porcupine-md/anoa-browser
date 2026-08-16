@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contoh: menyematkan anoa</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1a1d23; --muted:#6b7280;
+          --line:#dfe3e9; --accent:#2f6fd0; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); padding:28px;
+         font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif }
+  h1 { margin:0 0 4px; font-size:20px }
+  .sub { margin:0 0 22px; color:var(--muted); font-size:14px }
+  .app { max-width:1120px; background:var(--card); border:1px solid var(--line);
+         border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.06) }
+  .bar { display:flex; align-items:center; gap:8px; padding:10px 12px;
+         border-bottom:1px solid var(--line); flex-wrap:wrap }
+  button { font:inherit; font-size:13px; padding:6px 12px; border-radius:6px;
+           border:1px solid var(--line); background:#fff; color:var(--ink); cursor:pointer }
+  button:hover { border-color:var(--accent); color:var(--accent) }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff }
+  .spacer { flex:1 }
+  .hint { color:var(--muted); font-size:12.5px }
+  iframe { display:block; width:100%; height:620px; border:0; background:#000 }
+</style>
+</head>
+<body>
+
+<h1>Aplikasi saya</h1>
+<p class="sub">Browser anoa disematkan di bawah ini. Tombol tab digambar oleh aplikasi ini
+sendiri, dari daftar tab yang dibaca lewat <code>/json/list</code>.</p>
+
+<div class="app">
+  <div class="bar">
+    <span class="hint">Tab:</span>
+    <span id="tabs"></span>
+    <button id="new">+ Tab baru</button>
+    <span class="spacer"></span>
+    <span class="hint">Klik sekali di dalam tampilan sebelum mengetik.</span>
+  </div>
+  <iframe id="view" title="anoa live view"></iframe>
+</div>
+
+<script>
+// ── Ke mana anoa mendengarkan, dan tokennya kalau ada ───────────────────────
+const ANOA  = 'http://127.0.0.1:9222';
+const TOKEN = '';   // isi kalau anoa dijalankan dengan --auth-token
+
+let current = null; // tab yang sedang ditampilkan, mis. "t1"
+
+/** Tempelkan token ke query bila dipakai. */
+function q(params = {}) {
+  const p = new URLSearchParams(params);
+  if (TOKEN) p.set('token', TOKEN);
+  return p.toString();
+}
+
+/** Arahkan iframe ke satu tab. embed=1 membuang bilah tab bawaan viewer. */
+function show(tabId) {
+  current = tabId;
+  document.getElementById('view').src =
+    `${ANOA}/render?${q({ embed: '1', tab: tabId })}`;
+  paintTabs();
+}
+
+/** Gambar tombol tab dari daftar tab anoa sendiri. */
+async function refreshTabs() {
+  const resp = await fetch(`${ANOA}/json/list?${q()}`);
+  const list = (await resp.json()).filter(t => t.anoaTabId);
+  window.__tabs = list;
+  if (!current && list.length) show(list.find(t => t.anoaActive)?.anoaTabId ?? list[0].anoaTabId);
+  else paintTabs();
+}
+
+function paintTabs() {
+  const host = document.getElementById('tabs');
+  host.textContent = '';
+  for (const t of (window.__tabs ?? [])) {
+    const b = document.createElement('button');
+    b.textContent = t.anoaTabName || t.title || t.anoaTabId;
+    b.title = t.url || '';
+    if (t.anoaTabId === current) b.className = 'on';
+    b.onclick = () => show(t.anoaTabId);
+    host.appendChild(b);
+  }
+}
+
+document.getElementById('new').onclick = async () => {
+  const resp = await fetch(`${ANOA}/render/tab/new?${q({ url: 'https://example.com' })}`,
+                           { method: 'POST' });
+  const { id } = await resp.json();
+  await refreshTabs();
+  show(id);
+};
+
+refreshTabs();
+setInterval(refreshTabs, 3000);
+</script>
+
+</body>
+</html>
