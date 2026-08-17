@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>anoa — a browser you can talk to</title>
-<meta name="description" content="A real Chromium browser that takes commands. Drive it from a shell, an HTTP endpoint or any CDP client, watch it in your terminal, or embed a live view people can use.">
+<meta name="description" content="A real Chromium browser that takes commands. Drive it from a shell, an HTTP endpoint or any CDP client, and watch it live in a browser tab or in your terminal.">
 <link rel="icon" href="images/anoa-mascot.png">
 
 <meta property="og:title" content="anoa — a browser you can talk to">
@@ -246,32 +246,36 @@ footer .links{margin-left:auto;display:flex;gap:18px;font-size:14px}
     others stay live in the background.</figcaption>
   </figure>
 
-  <div class="col" style="margin-top:44px">
-    <h3 style="font-size:19px;margin-bottom:10px">Drop it into your own app</h3>
-    <p>It is built to sit in an <code>&lt;iframe&gt;</code>. <code>?tab=</code> picks
-    which tab that frame drives, so two frames drive two tabs at once — an agent's
-    tab and a person's, side by side. <code>?embed=1</code> drops the built-in chrome
-    so your app draws its own.</p>
+</section>
+
+<section id="terminal">
+  <div class="col">
+    <p class="eyebrow">anoa terminal</p>
+    <h2>A web page, in the terminal you are already in</h2>
+    <p>Over SSH, on a box with no display: <code>anoa terminal</code> renders the live
+    page as half-block ANSI, or as real images in iTerm2 and kitty, and forwards your
+    clicks, scrolls and typing back to it. Point it at a running browser, at any
+    external Chrome with <code>--cdp</code>, or at nothing at all and it hosts its own.</p>
   </div>
 
-<pre class="term"><span class="c">&lt;!-- your app --&gt;</span>
-&lt;iframe src=<b>"http://localhost:9222/render?embed=1&amp;tab=t2"</b>
-        width="1280" height="720" style="border:0"&gt;&lt;/iframe&gt;</pre>
-
-  <figure>
-    <img src="images/live-view-embedded.png" alt="A host application embedding the anoa live view, drawing its own tab bar above it">
-    <figcaption>A host app embedding the view and drawing its own tab bar from
-    <code>/json/list</code>. Mouse and keyboard are handled inside the frame — the
-    host forwards nothing.</figcaption>
+<figure>
+    <img src="images/anoa-terminal.png" alt="Hacker News rendered inside a terminal window by anoa terminal, with a status bar reading: anoa terminal http 127.0.0.1:9222 1280x720 [iterm] ctrl-c=quit, scroll up">
+    <figcaption>Hacker News, in a terminal. This is the iTerm2 image backend —
+    <code>[iterm]</code> in the status bar — so the page is rendered, not
+    approximated. On a terminal without an image protocol the same view falls
+    back to half-block ANSI, which is coarser but works over any SSH session.
+    The bar along the bottom names what it is attached to, the viewport size,
+    and the last thing you did.</figcaption>
   </figure>
 
-  <div class="col" style="margin-top:40px">
-    <p><strong>Framing is opt-in by origin.</strong> The view forwards keystrokes as
-    well as showing pixels, so a page that can frame it can act inside a logged-in
-    session. The default is same-origin only; naming an origin is one flag:</p>
-  </div>
+<pre class="term"><span class="c"># watch and control a browser running anywhere</span>
+<span class="p">$</span> anoa terminal --term-host 10.0.0.4 --term-port 9222
 
-<pre class="term"><span class="p">$</span> anoa --headless --port 9222 --embed-origin <b>https://app.example.com</b></pre>
+<span class="c"># or attach to any Chrome you already started</span>
+<span class="p">$</span> anoa terminal --cdp http://127.0.0.1:9222
+
+<span class="c"># or just this, and it brings its own browser</span>
+<span class="p">$</span> anoa terminal</pre>
 </section>
 
 <section id="inspect">
@@ -287,26 +291,6 @@ footer .links{margin-left:auto;display:flex;gap:18px;font-size:14px}
     <img src="images/live-view-devtools.png" alt="Chromium DevTools attached to the page anoa is streaming, showing the Elements and Styles panels">
     <figcaption>DevTools attached to the streamed tab, opened from the viewer.</figcaption>
   </figure>
-</section>
-
-<section id="terminal">
-  <div class="col">
-    <p class="eyebrow">anoa terminal</p>
-    <h2>A web page, in the terminal you are already in</h2>
-    <p>Over SSH, on a box with no display: <code>anoa terminal</code> renders the live
-    page as half-block ANSI, or as real images in iTerm2 and kitty, and forwards your
-    clicks, scrolls and typing back to it. Point it at a running browser, at any
-    external Chrome with <code>--cdp</code>, or at nothing at all and it hosts its own.</p>
-  </div>
-
-<pre class="term"><span class="c"># watch and control a browser running anywhere</span>
-<span class="p">$</span> anoa terminal --term-host 10.0.0.4 --term-port 9222
-
-<span class="c"># or attach to any Chrome you already started</span>
-<span class="p">$</span> anoa terminal --cdp http://127.0.0.1:9222
-
-<span class="c"># or just this, and it brings its own browser</span>
-<span class="p">$</span> anoa terminal</pre>
 </section>
 
 <section id="cdp">
