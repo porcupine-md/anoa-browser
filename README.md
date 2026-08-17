@@ -479,7 +479,7 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 | `GET` | `/render/html` | `text/html` | Rendered DOM source (`page()->toHtml()`) |
 | `POST` | `/render/navigate?url=<url>` | `text/plain` | Load a URL into the embedded browser |
 | `POST` | `/render/click?x=<px>&y=<px>&button=left\|right\|middle` | `text/plain` | Synthesize a mouse click at viewport coordinates (button defaults to `left`) |
-| `POST` | `/render/scroll?dy=<delta>&x=<px>&y=<px>` | `text/plain` | Synthesize a mouse wheel event; `dy` in angle-delta units (±120 per notch, positive scrolls up), `x`/`y` default to the viewport center |
+| `POST` | `/render/scroll?dy=<delta>&x=<px>&y=<px>` | `text/plain` | Synthesize a mouse wheel event; `dy` in angle-delta units (±120 per notch, **negative scrolls down**), `x`/`y` default to the viewport center. Roughly 60 px of page per notch |
 | `POST` | `/render/type?text=<text>` | `text/plain` | Type text into the focused element (URL-encoded query param, or raw request body) |
 | `POST` | `/render/key?key=<name>&mods=<list>` | `text/plain` | Press a named key: `enter`, `tab`, `backspace`, `delete`, `escape`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `insert`, `f1`–`f12`, or a single character. `mods` is a comma-separated list of `ctrl`, `shift`, `alt`, `meta` — `key=a&mods=ctrl` is Select All |
 | `POST` | `/render/move?x=<px>&y=<px>&buttons=<list>&mods=<list>` | `text/plain` | Move the pointer. `buttons` names what is still held, which is what makes a move a drag rather than a hover |

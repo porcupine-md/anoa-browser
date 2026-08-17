@@ -56,6 +56,7 @@ body.embed #chrome{display:none}
     <button id="fwd" title="Forward">→</button>
     <button id="reload" title="Reload">⟳</button>
     <input id="url" placeholder="Enter a URL and press Return" spellcheck="false">
+    <button id="inspect" title="Open DevTools for this tab">Inspect</button>
   </div>
 </div>
 
@@ -298,6 +299,10 @@ body.embed #chrome{display:none}
     });
   }
 
+  // The entry /json/list reports for the tab on screen, kept so Inspect knows
+  // which engine target to point DevTools at.
+  var shownEntry = null;
+
   function pollTabs() {
     if (EMBED) return Promise.resolve();
     return fetch("/json/list" + (TOKEN ? "?token=" + encodeURIComponent(TOKEN) : ""))
@@ -309,10 +314,28 @@ body.embed #chrome{display:none}
         var shown = list.filter(function (t) {
           return TAB ? t.anoaTabId === TAB : t.anoaActive;
         })[0];
+        shownEntry = shown || null;
         if (shown && document.activeElement !== urlEl) urlEl.value = shown.url || "";
       })
       .catch(function () {});
   }
+
+  // ── inspect ──────────────────────────────────────────────────────────────
+  // Chromium's own DevTools, already running: the frontend is served on the
+  // debugging port (ours + 1) and talks to the page over the CDP proxy (ours
+  // + 2), which is exactly what webSocketDebuggerUrl already names. Nothing new
+  // is stood up here — this was reachable all along and had no way in.
+  //
+  // A new window rather than this one: DevTools inside a 640-pixel frame is not
+  // usable, and the point is to inspect the page, not to replace the view of it.
+  document.getElementById("inspect").addEventListener("click", function () {
+    if (!shownEntry || !shownEntry.webSocketDebuggerUrl) return;
+    var ws = shownEntry.webSocketDebuggerUrl.replace(/^wss?:\/\//, "");
+    if (TOKEN) ws += "?token=" + encodeURIComponent(TOKEN);
+    var devtoolsPort = Number(location.port || 80) + 1;
+    window.open(location.protocol + "//" + location.hostname + ":" + devtoolsPort
+                + "/devtools/inspector.html?ws=" + ws, "_blank", "noopener");
+  });
 
   document.getElementById("newtab").addEventListener("click", function () {
     fetch("/render/tab/new?" + (TOKEN ? "token=" + encodeURIComponent(TOKEN) : ""),

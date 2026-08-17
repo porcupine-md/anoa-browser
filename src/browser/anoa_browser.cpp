@@ -1028,12 +1028,38 @@ void AnoaBrowser::sendScroll(const QPoint &pos, int angleDeltaY, const QString &
         return;
     const QPointF posF(pos);
     const QPointF globalF(target->mapToGlobal(pos));
+    const auto stamp = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
+
+    auto post = [&](const QPoint &angle, const QPoint &pixels, Qt::ScrollPhase phase,
+                    quint64 at) {
+        auto *wheel = new QWheelEvent(posF, globalF, pixels, angle,
+                                      Qt::NoButton, Qt::NoModifier, phase, false);
+        wheel->setTimestamp(at);
+        QCoreApplication::postEvent(target, wheel);
+    };
+
+#ifdef Q_OS_MACOS
+    // macOS has no phaseless wheel. Qt delivers real scroll input there as a
+    // gesture — begin, update, end — and QtWebEngine maps Qt::NoScrollPhase to
+    // a Blink phase Chromium drops on the floor. The event was posted, accepted
+    // and discarded: /render/scroll answered "scrolled", the page never saw a
+    // wheel event at all, and nothing moved. Verified against Linux/aarch64,
+    // where the same phaseless event scrolls correctly.
+    //
+    // pixelDelta is what a phased event is steered by, and it has to be filled
+    // in or the gesture is a no-op with a different shape. angleDelta/2 is the
+    // ratio measured on Linux — 600 angle units moved the page 300 px — so the
+    // two platforms scroll the same distance for the same request.
+    const QPoint angle(0, angleDeltaY);
+    const QPoint pixels(0, angleDeltaY / 2);
+    post(QPoint(), QPoint(), Qt::ScrollBegin, stamp);
+    post(angle, pixels, Qt::ScrollUpdate, stamp + 1);
+    post(QPoint(), QPoint(), Qt::ScrollEnd, stamp + 2);
+#else
     // Null pixelDelta = classic notched wheel; angleDelta is in 1/8 degree,
     // one wheel notch = 120.
-    auto *wheel = new QWheelEvent(posF, globalF, QPoint(), QPoint(0, angleDeltaY),
-                                  Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-    wheel->setTimestamp(static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()));
-    QCoreApplication::postEvent(target, wheel);
+    post(QPoint(0, angleDeltaY), QPoint(), Qt::NoScrollPhase, stamp);
+#endif
 }
 
 void AnoaBrowser::sendText(const QString &text, const QString &tabId)

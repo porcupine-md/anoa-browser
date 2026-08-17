@@ -171,11 +171,82 @@ describe('Live view — pointer endpoints', () => {
     expect(await evalIn(tabId, 'document.getElementById("i").value')).toBe('halo dunia');
   });
 
+  // LV-07b — the assertion whose absence let a broken endpoint answer "scrolled"
+  // for as long as it has existed. Nothing checked that the page moved.
+  //
+  // It was broken on macOS only: there is no phaseless wheel there, so Qt sends
+  // scroll input as a gesture and QtWebEngine maps Qt::NoScrollPhase to a Blink
+  // phase Chromium discards. The event was posted, accepted, and dropped before
+  // the page ever saw it. Linux/aarch64 scrolled correctly the whole time,
+  // which is why running only on Linux would not have caught it.
+  it('scrolling actually moves the page, in both directions', async () => {
+    const tabs = await listTabs();
+    const tabId = tabs[0].anoaTabId;
+    // A document tall enough to scroll, built here rather than fetched so the
+    // test does not depend on the network.
+    await evalIn(tabId, `document.body.innerHTML =
+      '<div style="height:6000px">tinggi</div>'; window.scrollTo(0, 0); 'ready'`);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await evalIn(tabId, 'window.scrollY')).toBe(0);
+
+    // Negative dy scrolls down — angle-delta convention, positive is up.
+    expect((await post(`/render/scroll?tab=${tabId}&dy=-600&x=400&y=300`)).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 1200));
+    const down = await evalIn(tabId, 'window.scrollY');
+    expect(down).toBeGreaterThan(0);
+
+    await post(`/render/scroll?tab=${tabId}&dy=600&x=400&y=300`);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(await evalIn(tabId, 'window.scrollY')).toBeLessThan(down);
+  }, 20000);
+
+  // LV-07c — and the page must see a real wheel event, not just end up moved.
+  // A page that scrolls its own container listens for this.
+  it('the page receives a wheel event', async () => {
+    const tabs = await listTabs();
+    const tabId = tabs[0].anoaTabId;
+    await evalIn(tabId, `window.__wheel = 0;
+      window.addEventListener('wheel', () => { window.__wheel++; }, { passive: true });
+      'ready'`);
+    await post(`/render/scroll?tab=${tabId}&dy=-240&x=400&y=300`);
+    await new Promise((r) => setTimeout(r, 600));
+    expect(await evalIn(tabId, 'window.__wheel')).toBeGreaterThan(0);
+  });
+
   // LV-07
   it('function keys are accepted', async () => {
     expect((await post('/render/key?key=f5')).status).toBe(200);
     expect((await post('/render/key?key=f12')).status).toBe(200);
     expect((await post('/render/key?key=f13')).status).toBe(400);
+  });
+});
+
+describe('Live view — inspecting the page it streams', () => {
+  let proc;
+
+  beforeAll(async () => { proc = await startBrowser(); }, 20000);
+  afterAll(() => stopBrowser(proc));
+
+  // LV-07d — the Inspect button stands nothing up: it points at Chromium's own
+  // DevTools, already served on the debugging port, talking to the page over
+  // the CDP proxy that webSocketDebuggerUrl already names. This is the server
+  // fact the button depends on, so it is the part worth pinning.
+  it('Chromium DevTools is served on the debugging port', async () => {
+    const resp = await fetch(`http://localhost:${HTTP_PORT + 1}/devtools/inspector.html`);
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get('content-type')).toMatch(/text\/html/);
+  });
+
+  // LV-07e
+  it('every tab publishes the socket DevTools attaches to', async () => {
+    const tabs = await listTabs();
+    expect(tabs.length).toBeGreaterThan(0);
+    for (const t of tabs) {
+      // The proxy port, not the raw debugging port — the proxy is where the
+      // auth token is enforced.
+      expect(t.webSocketDebuggerUrl).toMatch(
+        new RegExp(`^ws://[^/]+:${HTTP_PORT + 2}/devtools/page/`));
+    }
   });
 });
 

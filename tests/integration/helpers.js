@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from 'child_process';
-import { createConnection, createServer } from 'net';
+import { createConnection, createServer, Socket } from 'net';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import WebSocket from 'ws';
@@ -72,15 +72,67 @@ export function freePort() {
  * Start the anoa binary and wait for HTTP port to be ready.
  * Returns the child process.
  */
+/**
+ * Wait until nothing is listening on a port.
+ *
+ * waitForPort() answers as soon as the port accepts, which is the wrong question
+ * when a browser is still on its way out: the previous instance is still
+ * listening, the new one loses the bind and dies, and every assertion that
+ * follows is measured against the wrong process. That failure has shown up as
+ * "expected 200 to be 401" — the old browser, which had no auth token — and as
+ * a whole file's worth of cases silently marked skipped, because vitest reports
+ * a beforeAll that threw as a skip rather than a failure.
+ */
+export function waitForPortFree(port, timeout = 10000) {
+  const deadline = Date.now() + timeout;
+  return new Promise((resolve, reject) => {
+    function attempt() {
+      const sock = new Socket();
+      sock.setTimeout(500);
+      const retry = () => {
+        sock.destroy();
+        if (Date.now() >= deadline)
+          return reject(new Error(`Port ${port} still bound after ${timeout}ms`));
+        setTimeout(attempt, 100);
+      };
+      sock.once('connect', retry);            // still listening
+      sock.once('timeout', retry);
+      sock.once('error', () => { sock.destroy(); resolve(); }); // refused = free
+      sock.connect(port, '127.0.0.1');
+    }
+    attempt();
+  });
+}
+
 export async function startBrowser(extraArgs = []) {
+  // The port has to be ours before we ask for it, or we bind nothing and talk
+  // to whatever is still there.
+  await waitForPortFree(HTTP_PORT);
+
   const args = ['--headless', '--no-sandbox', `--port=${HTTP_PORT}`, ...extraArgs];
   const proc = spawn(BINARY, args, {
     env: { ...process.env, QPA_PLATFORM: 'offscreen' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let stderr = '';
   proc.stdout.on('data', (d) => process.env.ANOA_VERBOSE && process.stdout.write(d));
-  proc.stderr.on('data', (d) => process.env.ANOA_VERBOSE && process.stderr.write(d));
-  await waitForPort(HTTP_PORT, 15000);
+  proc.stderr.on('data', (d) => {
+    stderr += d;
+    if (process.env.ANOA_VERBOSE) process.stderr.write(d);
+  });
+
+  // A browser that dies on startup would otherwise be waited on for the full
+  // timeout and then reported as a port problem, with the reason it actually
+  // gave thrown away.
+  const died = new Promise((_, reject) => {
+    proc.once('exit', (code) => {
+      reject(new Error(`anoa exited with ${code} before binding ${HTTP_PORT}`
+                       + (stderr ? `: ${stderr.trim().split('\n').slice(-3).join(' | ')}` : '')));
+    });
+  });
+  died.catch(() => {}); // an exit after a successful start is not an error
+
+  await Promise.race([waitForPort(HTTP_PORT, 15000), died]);
   return proc;
 }
 
@@ -113,9 +165,22 @@ export function openWs(path = '', token = null) {
  * Returns { ws, targetId }.
  */
 export async function openDevtoolsWs(token = null) {
-  const resp = await fetch(`${BASE_URL}/json/list`);
-  const list = await resp.json();
-  if (!list.length) throw new Error('/json/list returned empty array');
+  // /json/list is legitimately empty for a moment after startup: a tab is built
+  // before its Chromium target exists, and the list is assembled from tabs whose
+  // target id has resolved. Binding the HTTP port — all startBrowser waits for —
+  // happens first, so asking straight away is a race that a loaded machine
+  // loses. It surfaced as a whole file reported "skipped" with zero failures,
+  // because vitest calls a beforeAll that threw a skip.
+  const deadline = Date.now() + 15000;
+  let list = [];
+  for (;;) {
+    const resp = await fetch(`${BASE_URL}/json/list`);
+    list = await resp.json();
+    if (list.length) break;
+    if (Date.now() >= deadline)
+      throw new Error('/json/list stayed empty for 15s');
+    await new Promise((r) => setTimeout(r, 150));
+  }
   const target = list[0];
   // The URL returned in webSocketDebuggerUrl already points to our proxy port.
   const wsUrl = token

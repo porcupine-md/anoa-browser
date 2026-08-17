@@ -37,6 +37,7 @@ sendiri, dari daftar tab yang dibaca lewat <code>/json/list</code>.</p>
     <span id="tabs"></span>
     <button id="new">+ Tab baru</button>
     <span class="spacer"></span>
+    <button id="inspect">Inspect</button>
     <span class="hint">Klik sekali di dalam tampilan sebelum mengetik.</span>
   </div>
   <iframe id="view" title="anoa live view"></iframe>
@@ -85,6 +86,21 @@ function paintTabs() {
     host.appendChild(b);
   }
 }
+
+// DevTools Chromium untuk tab yang sedang ditampilkan. Frontend-nya disajikan di
+// port debug anoa (port + 1) dan berbicara ke halaman lewat proxy CDP (port + 2)
+// — persis yang sudah disebut oleh webSocketDebuggerUrl di /json/list.
+document.getElementById('inspect').onclick = () => {
+  const t = (window.__tabs ?? []).find(x => x.anoaTabId === current);
+  if (!t) return;
+  const anoa = new URL(ANOA);
+  let ws = t.webSocketDebuggerUrl.replace(/^wss?:\/\//, '');
+  if (TOKEN) ws += `?token=${encodeURIComponent(TOKEN)}`;
+  const port = Number(anoa.port || 80) + 1;
+  // Jendela baru: DevTools di dalam iframe selebar 860px tidak bisa dipakai.
+  window.open(`${anoa.protocol}//${anoa.hostname}:${port}/devtools/inspector.html?ws=${ws}`,
+              '_blank', 'noopener');
+};
 
 document.getElementById('new').onclick = async () => {
   const resp = await fetch(`${ANOA}/render/tab/new?${q({ url: 'https://example.com' })}`,

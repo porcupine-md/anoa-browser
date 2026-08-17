@@ -562,3 +562,20 @@
   alasan orang menyematkannya. CORS kini memakai daftar origin yang sama.
   Pelajarannya: menulis contoh yang benar-benar dijalankan menemukan hal yang
   tidak ditemukan suite endpoint, karena suite memanggil server tanpa origin.
+- /render/scroll tidak pernah bekerja di macOS, dan tak ada satu tes pun yang
+  memeriksa halaman benar-benar bergerak — endpoint menjawab "scrolled" dan
+  halaman diam. macOS tak punya wheel tanpa fase: Qt mengirimnya sebagai gestur,
+  dan QtWebEngine memetakan Qt::NoScrollPhase ke fase Blink yang dibuang
+  Chromium, jadi peristiwanya diposting, diterima, lalu hilang sebelum sampai ke
+  halaman. Linux/aarch64 benar sejak dulu — dibuktikan dengan menjalankan rilis
+  v0.10.1 di papan RK3588, yang scroll-nya jalan. Pelajaran: menjalankan suite
+  hanya di satu OS tidak akan pernah menemukan ini.
+- Inspect element ternyata sudah tersedia penuh dan tak punya jalan masuk:
+  frontend DevTools Chromium disajikan di port+1 dan berbicara ke halaman lewat
+  proxy CDP di port+2, persis yang sudah disebut webSocketDebuggerUrl. Yang
+  ditambahkan hanya tombol.
+- Dua kelemahan harness tes yang membuat angka menyesatkan: vitest melaporkan
+  beforeAll yang melempar sebagai "skipped", bukan "failed", sehingga satu berkas
+  penuh (10 kasus pdf_handler) hilang di balik "0 gagal"; dan /json/list sah-sah
+  saja kosong sesaat setelah start karena id target Chromium belum diresolusi,
+  sementara startBrowser hanya menunggu port terikat.
