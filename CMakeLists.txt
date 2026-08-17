@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(anoa VERSION 0.10.1 LANGUAGES CXX)
+project(anoa VERSION 0.11.0 LANGUAGES CXX)
 
 # CI injects the git tag here so the tag is the single source of truth for the
 # version — CMakeLists.txt never needs a manual bump for releases. The value
