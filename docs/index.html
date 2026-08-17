@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>anoa — a browser you can talk to</title>
+<meta name="description" content="A real Chromium browser that takes commands. Drive it from a shell, an HTTP endpoint or any CDP client, watch it in your terminal, or embed a live view people can use.">
+<link rel="icon" href="images/anoa-mascot.png">
+
+<meta property="og:title" content="anoa — a browser you can talk to">
+<meta property="og:description" content="A real Chromium browser that takes commands. Drive it from a shell, an HTTP endpoint or any CDP client.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="images/live-view.png">
+
+<style>
+/* ── palette, taken from the mascot: the green of the vest, the brown of the
+      fur, and a near-black warmed toward both ─────────────────────────────── */
+:root {
+  --ground:#fbfaf8; --paper:#f2efe9; --sunk:#e9e5dc;
+  --ink:#241c16; --ink-2:#4a3f36; --muted:#6f6256;
+  --rule:#ded8cd; --rule-soft:#ebe6dc;
+  --accent:#3f7a2a; --accent-soft:#e8f2e1; --accent-ink:#2e5c1e; --on-accent:#ffffff;
+  --fur:#9c6844;
+  --term-bg:#1b1714; --term-ink:#e8e2d8; --term-dim:#9c9186; --term-accent:#8fce6b;
+  --shadow:0 1px 2px rgba(36,28,22,.06), 0 8px 24px rgba(36,28,22,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:#13100e; --paper:#1c1815; --sunk:#241f1b;
+    --ink:#efeae2; --ink-2:#cdc4b8; --muted:#948a7e;
+    --rule:#2e2823; --rule-soft:#241f1b;
+    --accent:#7fbe5c; --accent-soft:#1b2716; --accent-ink:#9ed37e; --on-accent:#0e1c08;
+    --fur:#c08a5e;
+    --term-bg:#0d0b09; --term-ink:#e8e2d8; --term-dim:#8d8377; --term-accent:#8fce6b;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font:16.5px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.mono,code,kbd,pre{
+  font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.col{max-width:64ch}
+
+/* ── nav ──────────────────────────────────────────────────────────────────── */
+nav{
+  position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--ground) 88%,transparent);
+  backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--rule-soft);
+}
+nav .wrap{display:flex;align-items:center;gap:20px;height:56px}
+nav .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.01em;text-decoration:none;color:var(--ink)}
+nav .brand img{width:26px;height:26px}
+nav .links{margin-left:auto;display:flex;gap:20px;font-size:14.5px}
+nav a{color:var(--muted);text-decoration:none}
+nav a:hover{color:var(--accent)}
+@media (max-width:640px){nav .links a.opt{display:none}}
+
+/* ── hero ─────────────────────────────────────────────────────────────────── */
+header{padding:72px 0 8px}
+.hero{display:grid;grid-template-columns:1fr auto;gap:40px;align-items:center}
+@media (max-width:820px){.hero{grid-template-columns:1fr}.hero img.mascot{width:180px;justify-self:start}}
+h1{
+  font-size:clamp(34px,5.4vw,58px);line-height:1.04;letter-spacing:-.03em;
+  font-weight:750;margin:0 0 18px;text-wrap:balance;
+}
+h1 .g{color:var(--accent)}
+.lede{font-size:19.5px;line-height:1.55;color:var(--ink-2);margin:0;max-width:52ch}
+.hero img.mascot{width:230px;height:auto}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px;font-size:12.5px}
+.badges span{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--paper);border:1px solid var(--rule-soft);color:var(--muted);
+  padding:4px 10px;border-radius:20px;
+}
+.badges span b{color:var(--ink-2);font-weight:600}
+
+/* ── terminal blocks: the product is a command line, so the page shows one ── */
+pre.term{
+  background:var(--term-bg);color:var(--term-ink);border-radius:10px;
+  padding:18px 20px;overflow-x:auto;margin:22px 0 0;font-size:13.5px;line-height:1.75;
+  box-shadow:var(--shadow);
+}
+pre.term .p{color:var(--term-accent);user-select:none}   /* the $ prompt */
+pre.term .c{color:var(--term-dim)}                       /* comments */
+pre.term .o{color:var(--term-dim)}                       /* command output */
+pre.term b{color:#fff;font-weight:600}
+
+/* ── sections ─────────────────────────────────────────────────────────────── */
+section{padding:64px 0;border-top:1px solid var(--rule-soft)}
+section:first-of-type{border-top:0}
+.eyebrow{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin:0 0 12px;
+}
+h2{font-size:clamp(24px,3vw,31px);line-height:1.15;letter-spacing:-.02em;font-weight:700;margin:0 0 14px;text-wrap:balance}
+h3{font-size:17px;font-weight:650;margin:0 0 6px;letter-spacing:-.008em}
+p{margin:0 0 15px;color:var(--ink-2)}
+p:last-child{margin-bottom:0}
+strong{color:var(--ink);font-weight:650}
+
+figure{margin:30px 0 0}
+figure img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--rule);box-shadow:var(--shadow);background:var(--paper)}
+figcaption{margin-top:12px;font-size:13.5px;line-height:1.55;color:var(--muted);max-width:72ch}
+
+/* ── feature grid ─────────────────────────────────────────────────────────── */
+.grid{display:grid;gap:1px;background:var(--rule-soft);border:1px solid var(--rule-soft);border-radius:11px;overflow:hidden;margin-top:30px;grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
+.grid > div{background:var(--paper);padding:20px 22px}
+.grid p{font-size:14.5px;margin:0;color:var(--muted)}
+
+/* ── install ──────────────────────────────────────────────────────────────── */
+.tabs{display:flex;flex-wrap:wrap;gap:7px;margin:24px 0 0}
+.tabs button{
+  font:inherit;font-size:13.5px;font-weight:550;padding:7px 15px;border-radius:7px;cursor:pointer;
+  background:var(--paper);border:1px solid var(--rule);color:var(--ink-2);
+}
+.tabs button:hover{border-color:var(--accent);color:var(--accent)}
+.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.panel[hidden]{display:none}
+.panel p.note{font-size:13.5px;color:var(--muted);margin:14px 0 0}
+
+/* ── code inline ──────────────────────────────────────────────────────────── */
+code:not(pre code){background:var(--sunk);border:1px solid var(--rule-soft);padding:1.5px 5px;border-radius:4px;font-size:.87em;color:var(--ink)}
+a{color:var(--accent);text-underline-offset:2px}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+.cta{display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:var(--on-accent);text-decoration:none;font-weight:600;font-size:15px;padding:11px 20px;border-radius:8px;margin-top:26px}
+.cta:hover{filter:brightness(1.08)}
+.cta.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:10px}
+
+footer{padding:52px 0 72px;border-top:1px solid var(--rule-soft);margin-top:8px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:22px;align-items:center}
+footer p{font-size:13.5px;color:var(--muted);margin:0}
+footer .links{margin-left:auto;display:flex;gap:18px;font-size:14px}
+@media (max-width:640px){footer .links{margin-left:0}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="images/anoa-mascot.png" alt="">anoa</a>
+    <div class="links">
+      <a class="opt" href="#drive">Drive</a>
+      <a class="opt" href="#watch">Live view</a>
+      <a class="opt" href="#terminal">Terminal</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/porcupine-md/anoa-browser">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header id="top">
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1>A browser that <span class="g">takes commands</span>.</h1>
+        <p class="lede">anoa is a real Chromium, driven from a shell, an HTTP endpoint,
+        or any CDP client. One binary, no driver to install, no headless-versus-real
+        distinction to reason about.</p>
+        <div class="badges">
+          <span>latest <b>v0.11.0</b></span>
+          <span>macOS · Linux · Windows</span>
+          <span>x86_64 · <b>aarch64</b></span>
+          <span>Qt 6 + Chromium</span>
+        </div>
+        <a class="cta" href="#install">Install it</a>
+        <a class="cta ghost" href="https://github.com/porcupine-md/anoa-browser">Read the source</a>
+      </div>
+      <img class="mascot" src="images/anoa-mascot.png"
+           alt="The anoa mascot, a dwarf buffalo in a green vest, holding a mouse cursor">
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="drive">
+  <div class="col">
+    <p class="eyebrow">One command per action</p>
+    <h2>Built to be driven by something that cannot see</h2>
+    <p>Every command attaches to a browser that is already running and leaves it
+    running, so the page, the cookies and the scroll position survive between them.
+    <code>snapshot</code> hands back refs that the next command targets — which is
+    the part that makes this usable by an agent rather than by a person watching a
+    screen.</p>
+  </div>
+
+<pre class="term"><span class="p">$</span> anoa --headless --port 9222 &amp;
+<span class="p">$</span> anoa open example.com
+<span class="p">$</span> anoa snapshot -i
+<span class="o">  @e1   link       Documentation
+  @e3   textbox    Search  [required]
+  @e7   button     Sign in</span>
+<span class="p">$</span> anoa fill @e3 <b>"anoa browser"</b>
+<span class="p">$</span> anoa click @e7
+<span class="p">$</span> anoa wait --selector ".results"
+<span class="p">$</span> anoa get text</pre>
+
+  <div class="grid">
+    <div>
+      <h3>Clicks are hit-tested</h3>
+      <p>A button underneath a consent banner is reported, not clicked through. You
+      find out that the click did not land, instead of finding out later.</p>
+    </div>
+    <div>
+      <h3>Tabs with names</h3>
+      <p><code>anoa tab new example.com --name research</code>. Every command takes
+      <code>--tab</code>, so parallel work stays in its own tab, addressed by a name
+      you chose.</p>
+    </div>
+    <div>
+      <h3>Profiles that remember</h3>
+      <p>Logins survive between runs by default. Named profiles get their own cookie
+      jar and storage; <code>--ephemeral</code> keeps nothing.</p>
+    </div>
+    <div>
+      <h3>An agent can read the manual</h3>
+      <p><code>anoa skills get core</code> prints the workflow as text meant to be
+      pasted into a context window, not into a browser.</p>
+    </div>
+  </div>
+</section>
+
+<section id="watch">
+  <div class="col">
+    <p class="eyebrow">Live view · new in v0.11.0</p>
+    <h2>Watch it work — and hand the controls over</h2>
+    <p><code>/render</code> is a page. Open it in any browser and you get the live
+    stream of a tab you can <strong>click, drag, type and scroll in</strong>, with a
+    tab bar, a URL bar and an Inspect button. No client to install, nothing to build.</p>
+  </div>
+
+  <figure>
+    <img src="images/live-view.png" alt="The anoa live view: a tab bar, a URL bar, an Inspect button, and a streamed web page">
+    <figcaption>The live view at <code>/render</code>, streaming one tab while the
+    others stay live in the background.</figcaption>
+  </figure>
+
+  <div class="col" style="margin-top:44px">
+    <h3 style="font-size:19px;margin-bottom:10px">Drop it into your own app</h3>
+    <p>It is built to sit in an <code>&lt;iframe&gt;</code>. <code>?tab=</code> picks
+    which tab that frame drives, so two frames drive two tabs at once — an agent's
+    tab and a person's, side by side. <code>?embed=1</code> drops the built-in chrome
+    so your app draws its own.</p>
+  </div>
+
+<pre class="term"><span class="c">&lt;!-- your app --&gt;</span>
+&lt;iframe src=<b>"http://localhost:9222/render?embed=1&amp;tab=t2"</b>
+        width="1280" height="720" style="border:0"&gt;&lt;/iframe&gt;</pre>
+
+  <figure>
+    <img src="images/live-view-embedded.png" alt="A host application embedding the anoa live view, drawing its own tab bar above it">
+    <figcaption>A host app embedding the view and drawing its own tab bar from
+    <code>/json/list</code>. Mouse and keyboard are handled inside the frame — the
+    host forwards nothing.</figcaption>
+  </figure>
+
+  <div class="col" style="margin-top:40px">
+    <p><strong>Framing is opt-in by origin.</strong> The view forwards keystrokes as
+    well as showing pixels, so a page that can frame it can act inside a logged-in
+    session. The default is same-origin only; naming an origin is one flag:</p>
+  </div>
+
+<pre class="term"><span class="p">$</span> anoa --headless --port 9222 --embed-origin <b>https://app.example.com</b></pre>
+</section>
+
+<section id="inspect">
+  <div class="col">
+    <p class="eyebrow">Inspect</p>
+    <h2>Real DevTools, on the page being streamed</h2>
+    <p>The Inspect button opens Chromium's own DevTools against the tab you are
+    watching — Elements, Styles, Network, the console. Nothing is reimplemented:
+    the frontend is the one Chromium ships, talking over the CDP endpoint anoa
+    already exposes.</p>
+  </div>
+  <figure>
+    <img src="images/live-view-devtools.png" alt="Chromium DevTools attached to the page anoa is streaming, showing the Elements and Styles panels">
+    <figcaption>DevTools attached to the streamed tab, opened from the viewer.</figcaption>
+  </figure>
+</section>
+
+<section id="terminal">
+  <div class="col">
+    <p class="eyebrow">anoa terminal</p>
+    <h2>A web page, in the terminal you are already in</h2>
+    <p>Over SSH, on a box with no display: <code>anoa terminal</code> renders the live
+    page as half-block ANSI, or as real images in iTerm2 and kitty, and forwards your
+    clicks, scrolls and typing back to it. Point it at a running browser, at any
+    external Chrome with <code>--cdp</code>, or at nothing at all and it hosts its own.</p>
+  </div>
+
+<pre class="term"><span class="c"># watch and control a browser running anywhere</span>
+<span class="p">$</span> anoa terminal --term-host 10.0.0.4 --term-port 9222
+
+<span class="c"># or attach to any Chrome you already started</span>
+<span class="p">$</span> anoa terminal --cdp http://127.0.0.1:9222
+
+<span class="c"># or just this, and it brings its own browser</span>
+<span class="p">$</span> anoa terminal</pre>
+</section>
+
+<section id="cdp">
+  <div class="col">
+    <p class="eyebrow">Compatible</p>
+    <h2>It speaks CDP, so your existing tools already work</h2>
+    <p>Chrome-compatible discovery endpoints and a WebSocket proxy with session
+    multiplexing. Playwright and Puppeteer connect to it unmodified. Optional
+    bearer-token auth, and no Origin rejections, so it works behind tunnels and
+    reverse proxies.</p>
+  </div>
+
+<pre class="term"><span class="c">// Playwright</span>
+const browser = await chromium.<b>connectOverCDP</b>('http://localhost:9222');
+
+<span class="c">// Puppeteer</span>
+const browser = await puppeteer.<b>connect</b>({ browserURL: 'http://localhost:9222' });</pre>
+
+  <div class="col" style="margin-top:32px">
+    <p>Ports come in a triplet. You point a client at <code>9222</code>, which serves
+    discovery and <code>/render/*</code>; <code>9223</code> is Chromium's own debugging
+    port, kept internal; and the WebSocket the client is handed lands on
+    <code>9224</code>, the proxy that multiplexes sessions and checks the token.</p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="col">
+    <p class="eyebrow">Install</p>
+    <h2>One binary, and no runtime to install alongside it</h2>
+    <p>The terminal viewer is a subcommand of the same executable, not a second
+    file. Pick your platform.</p>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true"  aria-controls="p-mac"    id="t-mac">macOS</button>
+    <button role="tab" aria-selected="false" aria-controls="p-appimg" id="t-appimg">Linux · AppImage</button>
+    <button role="tab" aria-selected="false" aria-controls="p-script" id="t-script">Linux · script</button>
+    <button role="tab" aria-selected="false" aria-controls="p-docker" id="t-docker">Container</button>
+    <button role="tab" aria-selected="false" aria-controls="p-win"    id="t-win">Windows</button>
+  </div>
+
+  <div class="panel" id="p-mac" role="tabpanel" aria-labelledby="t-mac">
+<pre class="term"><span class="p">$</span> brew tap porcupine-md/tap
+<span class="p">$</span> brew trust porcupine-md/tap
+<span class="p">$</span> brew install --cask anoa</pre>
+    <p class="note">One universal build for Intel and Apple Silicon, Developer ID
+    signed and notarized — it opens with no Gatekeeper warnings.</p>
+  </div>
+
+  <div class="panel" id="p-appimg" role="tabpanel" aria-labelledby="t-appimg" hidden>
+<pre class="term"><span class="c"># x86_64 or aarch64 — one file, no unpacking, no root</span>
+<span class="p">$</span> chmod +x anoa-x86_64.AppImage
+<span class="p">$</span> ./anoa-x86_64.AppImage --headless --port 9222
+<span class="p">$</span> ./anoa-x86_64.AppImage open example.com</pre>
+    <p class="note">Built for x86_64 and aarch64 against the same Qt, so both run on
+    anything with glibc 2.35 or newer — Ubuntu 22.04, Debian 12 and later, which is
+    what an ARM board usually runs. It carries its own FUSE, so it does not need
+    <code>libfuse2</code>. <a href="https://github.com/porcupine-md/anoa-browser/releases/latest">Download the latest release →</a></p>
+  </div>
+
+  <div class="panel" id="p-script" role="tabpanel" aria-labelledby="t-script" hidden>
+<pre class="term"><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/porcupine-md/anoa-browser/master/scripts/install-linux.sh | bash</pre>
+    <p class="note">Installs the portable bundle under <code>~/.local/lib/anoa</code>
+    and puts the launcher on your <code>PATH</code>. Nothing system-wide, no root, and
+    re-running it upgrades in place.</p>
+  </div>
+
+  <div class="panel" id="p-docker" role="tabpanel" aria-labelledby="t-docker" hidden>
+<pre class="term"><span class="p">$</span> docker run -d --name anoa -p 9222:9222 ghcr.io/porcupine-md/anoa-browser
+<span class="p">$</span> docker exec anoa anoa open example.com
+<span class="p">$</span> docker exec anoa anoa snapshot -i</pre>
+    <p class="note">Publish <code>9224</code> as well if a CDP client outside the
+    container needs to attach — that is where the WebSocket ends up.</p>
+  </div>
+
+  <div class="panel" id="p-win" role="tabpanel" aria-labelledby="t-win" hidden>
+<pre class="term"><span class="c"># download anoa-windows-x86_64.zip, unzip, then</span>
+<span class="p">&gt;</span> anoa.exe --headless --port 9222
+<span class="p">&gt;</span> anoa.exe open example.com</pre>
+    <p class="note">Everything works except <code>anoa terminal</code>, which needs
+    termios and is POSIX-only. <a href="https://github.com/porcupine-md/anoa-browser/releases/latest">Download the latest release →</a></p>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>Named after the <a href="https://en.wikipedia.org/wiki/Anoa">anoa</a>, a dwarf
+    buffalo from Sulawesi. Small, and not to be underestimated.</p>
+    <div class="links">
+      <a href="https://github.com/porcupine-md/anoa-browser">GitHub</a>
+      <a href="https://github.com/porcupine-md/anoa-browser/releases">Releases</a>
+      <a href="https://github.com/porcupine-md/anoa-browser#readme">Docs</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Install tabs. Plain buttons with aria-selected, so the panels are all in the
+// document and findable by search before any script runs.
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function select(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { select(t); });
+    t.addEventListener('keydown', function (e) {
+      var i = tabs.indexOf(t);
+      if (e.key === 'ArrowRight') { e.preventDefault(); tabs[(i + 1) % tabs.length].focus(); tabs[(i + 1) % tabs.length].click(); }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); tabs[(i - 1 + tabs.length) % tabs.length].focus(); tabs[(i - 1 + tabs.length) % tabs.length].click(); }
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
