@@ -491,6 +491,8 @@ All endpoints share the same `--auth-token` auth as the CDP endpoints: pass the 
 
 ### Embedding the live view
 
+![The live view embedded in another app](docs/images/live-view-embedded.png)
+
 `/render` is a page you can put in an `<iframe>`. It streams the tab over MJPEG
 and forwards mouse and keyboard back, so the person looking at your app can use
 the browser — hover a menu, drag a selection, type into a form, press Ctrl+A —
