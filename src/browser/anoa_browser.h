@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QTimer>
 #include <QSet>
 #include <QList>
 #include <QNetworkCookie>
@@ -74,6 +75,15 @@ public:
     QString newTabInBrowserContext(const QUrl &url, const QString &contextId) override;
     void whenTargetResolved(const QString &tabId,
                             std::function<void(const QString &targetId)> cb) override;
+    // --graze. Wake a tab if it is asleep, and restart its idle clock either
+    // way. Every entry point that acts on a tab calls this first: the HTTP
+    // render path, the CDP proxy when a client attaches, and selectTab.
+    //
+    // Returns once the tab is usable. A discarded page has to load before a
+    // command can read anything from it, so this blocks on a nested event loop
+    // for at most a few seconds rather than answering with an empty document.
+    void wakeTab(const QString &tabId) override;
+
     int tabCount() const;
     QWebEngineView *viewFor(const QString &id) const;
     QWebEnginePage *pageFor(const QString &id) const;
@@ -153,6 +163,10 @@ private:
         QString name;        // empty unless the caller chose one
         QString profileName; // empty = the shared default
         QString chromiumTargetId;
+        // Where the page was when it went to sleep. A discarded page is
+        // documented to reload itself on the way back and does not, headless,
+        // so the URL is kept and loaded explicitly.
+        QUrl sleepUrl;
     };
 
     // Every tab is built here so they are identical: same settings, same
@@ -186,6 +200,14 @@ private:
     // A CDP browser context is a profile as a client sees it. Minted per
     // profile OBJECT, so two tabs sharing a profile report one id and an
     // isolated tab reports its own.
+    // One timer per grazing tab, restarted on every touch and cancelled when
+    // the tab is woken, activated or closed. Keyed by anoa tab id, so a closed
+    // tab cannot leave a timer pointing at a deleted view.
+    QHash<QString, QTimer *> m_grazeTimers;
+    void startGrazing(const QString &tabId);
+    void stopGrazing(const QString &tabId);
+    void discardTab(const QString &tabId);
+
     QSet<QWebEngineProfile *> m_downloadWired;
     QHash<QWebEngineProfile *, QString> m_contextIds;
     int m_nextContextId = 0;

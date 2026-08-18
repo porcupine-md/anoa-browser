@@ -34,6 +34,9 @@ const Group kGroups[] = {
     --download-dir <dir>            where downloads land (default: Downloads)
     --max-renderers <n>             cap Chromium renderer processes; fewer
                                     processes is less memory, less parallelism
+    --graze <seconds>               send a tab out to pasture once nothing has
+                                    touched it this long, freeing its renderer;
+                                    the next command wakes it, reloading it
     --config <file>                 JSON or INI file of the above
     -v, --version                   print the version and exit
 

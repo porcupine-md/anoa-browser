@@ -366,6 +366,11 @@ void HttpServer::handleNewConnection()
         const QString asked = query.queryItemValue(QStringLiteral("tab"));
         if (!asked.isEmpty() && m_browser)
             renderTabId = m_browser->resolveTab(asked);
+        // Every handler below either reads the page or posts input at it, and
+        // both need it awake. Done once here rather than in a dozen places; a
+        // no-op unless --graze actually put this tab to sleep.
+        if (!renderTabId.isEmpty() && m_browser)
+            m_browser->wakeTab(renderTabId);
     }
 
     // Redirect /render/ (trailing slash) to /render, preserving query string.

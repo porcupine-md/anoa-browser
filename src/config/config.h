@@ -22,6 +22,11 @@ struct Config {
     // means roughly one per tab. Lower numbers trade parallelism for memory —
     // see the comment in anoa_browser.cpp where it is applied.
     int maxRenderers = 0;
+    // --graze: hand a tab's renderer back when nothing has touched it for this
+    // long. The clock is reset by every command that acts on the tab, so it
+    // measures "the agent is finished with this one", not "it is not on top".
+    // 0 disables it. Waking reloads the page — see AnoaBrowser::wakeTab().
+    int grazeSeconds = 0;
     // Origins allowed to put the live view (/render) in an iframe. Empty means
     // 'self' only, because the view forwards input as well as showing pixels —
     // a page that can frame it can drive the browser. "*" opts out entirely.

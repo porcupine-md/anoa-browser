@@ -1,10 +1,12 @@
 #include "cdp/cdp_proxy.h"
 #include "cdp/cdp_extensions.h"
+#include "cdp/tab_host.h"
 
 #include <QDebug>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QPointer>
+#include <QTimer>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QUrlQuery>
@@ -123,6 +125,15 @@ void CdpProxy::onNewConnection()
     QString targetId;
     if (path.startsWith(kPagePrefix))
         targetId = path.mid(kPagePrefix.size());
+
+    // --graze may have handed this tab's renderer back, taking its engine target
+    // with it. The id the client dialled is the stale one, and that is exactly
+    // what finds the tab: the registry still maps it. Waking has to happen for
+    // the agent CLI to work at all, because it reaches every tab over CDP
+    // rather than over /render/*.
+    QString grazedTab;
+    if (!targetId.isEmpty() && m_tabs)
+        grazedTab = m_tabs->tabIdForTargetId(targetId);
     m_clientTargetId.insert(client, targetId);
 
     QWebSocket *upstream = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
@@ -135,7 +146,31 @@ void CdpProxy::onNewConnection()
     connect(upstream, &QWebSocket::disconnected, this, &CdpProxy::onUpstreamDisconnected);
     connect(upstream, &QWebSocket::connected, this, &CdpProxy::onUpstreamConnected);
 
-    upstream->open(upstreamUrl);
+    if (grazedTab.isEmpty()) {
+        upstream->open(upstreamUrl);
+        return;
+    }
+
+    // Deferred by one event loop turn, and this is the whole trick: waking is
+    // fast but blocking, and blocking inside the connection handler leaves the
+    // socket we were just handed unusable — measured as a client that hangs
+    // until its own timeout while the wake itself took a tenth of a second.
+    // Off the handler's stack, the same call works.
+    QPointer<QWebSocket> up(upstream);
+    QPointer<QWebSocket> cl(client);
+    const QString dialled = targetId;
+    QTimer::singleShot(0, this, [this, up, cl, grazedTab, dialled]() {
+        if (!up || !cl)
+            return;
+        m_tabs->wakeTab(grazedTab);
+        // A woken tab came back on a new renderer, so its target id changed.
+        QString fresh = m_tabs->targetIdFor(grazedTab);
+        if (fresh.isEmpty())
+            fresh = dialled;
+        m_clientTargetId.insert(cl, fresh);
+        up->open(QUrl(QStringLiteral("ws://127.0.0.1:%1/devtools/page/%2")
+                          .arg(m_debugPort).arg(fresh)));
+    });
 }
 
 void CdpProxy::onClientMessage(const QString &message)

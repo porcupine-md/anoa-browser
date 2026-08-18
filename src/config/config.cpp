@@ -169,6 +169,9 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     QCommandLineOption extensionOpt("extension", "Path to an unpacked extension directory (repeatable)", "path");
     QCommandLineOption authTokenOpt("auth-token", "Bearer token required for CDP WebSocket connections", "token");
     QCommandLineOption configOpt("config", "Path to JSON or INI config file", "file");
+    QCommandLineOption grazeOpt("graze",
+        "Send a tab out to pasture once nothing has touched it for this many seconds: "
+        "its renderer is handed back. Waking it reloads the page", "seconds", "30");
     QCommandLineOption maxRenderersOpt("max-renderers",
         "Cap Chromium renderer processes (default: one per tab). Trades parallelism for memory", "n");
     QCommandLineOption embedOriginOpt("embed-origin",
@@ -198,6 +201,7 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     parser.addOption(authTokenOpt);
     parser.addOption(embedOriginOpt);
     parser.addOption(maxRenderersOpt);
+    parser.addOption(grazeOpt);
     parser.addOption(configOpt);
     parser.addOption(widthOpt);
     parser.addOption(heightOpt);
@@ -234,6 +238,17 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
         cfg.authToken = parser.value(authTokenOpt);
     if (parser.isSet(embedOriginOpt))
         cfg.embedOrigins = parser.values(embedOriginOpt);
+    if (parser.isSet(grazeOpt)) {
+        bool ok = false;
+        const int n = parser.value(grazeOpt).toInt(&ok);
+        if (!ok || n < 1) {
+            QTextStream err(stderr);
+            err << "Error: --graze must be a positive integer, got "
+                << parser.value(grazeOpt) << Qt::endl;
+            ::exit(1);
+        }
+        cfg.grazeSeconds = n;
+    }
     if (parser.isSet(maxRenderersOpt)) {
         bool ok = false;
         const int n = parser.value(maxRenderersOpt).toInt(&ok);

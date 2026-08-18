@@ -291,6 +291,154 @@ void AnoaBrowser::acceptDownloadsOn(QWebEngineProfile *profile)
             });
 }
 
+
+// ── grazing ────────────────────────────────────────────────────────────────
+// Chromium keeps a renderer process per tab, and that is where the memory of
+// many tabs goes: nine tabs measured at 1031 MB of renderers against 117 MB for
+// one. A tab the agent has finished reading does not need one until it comes
+// back, and Qt has a first-class way to say so.
+
+void AnoaBrowser::startGrazing(const QString &tabId)
+{
+    if (m_config.grazeSeconds <= 0 || tabId.isEmpty())
+        return;
+    if (indexOf(tabId) < 0)
+        return;
+    // Never the active tab: it is on screen and its renderer is the one working.
+    if (tabId == m_activeTabId)
+        return;
+
+    stopGrazing(tabId);
+    auto *timer = new QTimer(this);
+    timer->setSingleShot(true);
+    timer->setInterval(m_config.grazeSeconds * 1000);
+    connect(timer, &QTimer::timeout, this, [this, tabId]() { discardTab(tabId); });
+    m_grazeTimers.insert(tabId, timer);
+    timer->start();
+}
+
+void AnoaBrowser::stopGrazing(const QString &tabId)
+{
+    if (QTimer *t = m_grazeTimers.take(tabId)) {
+        t->stop();
+        t->deleteLater();
+    }
+}
+
+void AnoaBrowser::discardTab(const QString &tabId)
+{
+    stopGrazing(tabId);
+    const int idx = indexOf(tabId);
+    if (idx < 0 || tabId == m_activeTabId)
+        return;
+    QWebEngineView *view = m_tabs.at(idx).view;
+    if (!view || !view->page())
+        return;
+    if (view->page()->lifecycleState() == QWebEnginePage::LifecycleState::Discarded)
+        return;
+
+    // Qt refuses both transitions while the page is visible — "failed to
+    // transition from Active to Frozen state: page is visible" — and every tab
+    // here is visible on purpose, because a hidden QWebEngineView takes no
+    // input and that is what makes a background tab drivable.
+    //
+    // Hiding is therefore part of discarding, not a workaround: the invariant
+    // holds because nothing reaches a sleeping tab without waking it first, and
+    // waking shows it again.
+    m_tabs[idx].sleepUrl = view->url();
+    view->hide();
+    // Frozen first: Qt will not go straight from Active to Discarded.
+    view->page()->setLifecycleState(QWebEnginePage::LifecycleState::Frozen);
+    view->page()->setLifecycleState(QWebEnginePage::LifecycleState::Discarded);
+    // The cached engine target id is deliberately kept, even though the target
+    // it names died with the renderer. It is what /json/list advertises and
+    // what a client therefore dials, and dialling it is how the proxy finds
+    // this tab in order to wake it. Clearing it here made the tab vanish from
+    // discovery instead — unreachable rather than asleep.
+}
+
+void AnoaBrowser::wakeTab(const QString &tabId)
+{
+    if (tabId.isEmpty())
+        return;
+    const int idx = indexOf(tabId);
+    if (idx < 0)
+        return;
+    stopGrazing(tabId);
+
+    QWebEngineView *view = m_tabs.at(idx).view;
+    QWebEnginePage *page = view ? view->page() : nullptr;
+    if (!page) {
+        startGrazing(tabId);
+        return;
+    }
+    if (page->lifecycleState() == QWebEnginePage::LifecycleState::Active) {
+        // Awake already: this call was a touch, so the clock starts over.
+        startGrazing(tabId);
+        return;
+    }
+
+    const bool wasDiscarded =
+        page->lifecycleState() == QWebEnginePage::LifecycleState::Discarded;
+
+    // Visible first, then Active — the mirror of how it went to sleep. Qt gates
+    // the transitions on visibility in both directions, so asking for Active
+    // while the view is hidden is refused and the page never comes back. Sized
+    // as well as shown: the container may have been resized while this one was
+    // away, and a view that returns at the wrong geometry maps every later
+    // click to the wrong place.
+    view->setGeometry(rect());
+    view->show();
+    page->setLifecycleState(QWebEnginePage::LifecycleState::Active);
+
+    if (wasDiscarded) {
+        // Qt documents a discarded page as reloading itself once active.
+        // Headless it does not, and the page comes back blank — every command
+        // then fails for a reason that looks nothing like the cause.
+        const QUrl sleepUrl = m_tabs.at(idx).sleepUrl;
+        if (sleepUrl.isValid() && !sleepUrl.isEmpty()
+            && sleepUrl.toString() != QLatin1String("about:blank")) {
+            QEventLoop loop;
+            QTimer deadline;
+            deadline.setSingleShot(true);
+            connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+            QMetaObject::Connection c = connect(page, &QWebEnginePage::loadFinished,
+                                                &loop, [&loop](bool) { loop.quit(); });
+            view->load(sleepUrl);
+            // Never forever: a page that will not come back must not take the
+            // process with it.
+            deadline.start(15000);
+            loop.exec();
+            disconnect(c);
+        }
+        // A new renderer means a new engine target. The stale id has to go
+        // first: whenTargetResolved answers immediately from the cache, so
+        // waiting while the old value is still there returns the dead target.
+        m_tabs[idx].chromiumTargetId.clear();
+        resolveTargetId(tabId, 0);
+
+        // Block until the fresh id lands, because the caller — the CDP proxy —
+        // is about to read it to decide where to point the upstream socket.
+        if (chromiumTargetId(tabId).isEmpty()) {
+            QEventLoop idLoop;
+            QTimer idDeadline;
+            idDeadline.setSingleShot(true);
+            connect(&idDeadline, &QTimer::timeout, &idLoop, &QEventLoop::quit);
+            whenTargetResolved(tabId, [&idLoop](const QString &) { idLoop.quit(); });
+            idDeadline.start(5000);
+            idLoop.exec();
+        }
+    }
+
+    // Not on top: waking a background tab must not cover the active one.
+    if (!m_activeTabId.isEmpty() && m_activeTabId != tabId) {
+        const int activeIdx = indexOf(m_activeTabId);
+        if (activeIdx >= 0 && m_tabs.at(activeIdx).view)
+            m_tabs.at(activeIdx).view->raise();
+    }
+    startGrazing(tabId);
+}
+
 QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)
 {
     auto *view = new QWebEngineView(this);
@@ -398,6 +546,10 @@ QString AnoaBrowser::finishNewTab(Tab &tab, const QUrl &url)
     if (m_activeTabId.isEmpty()) {
         m_activeTabId = tab.id;
         tab.view->raise();
+    } else {
+        // Opened in the background: a tab an agent opens, reads once and then
+        // ignores is exactly what --graze is for, so its clock starts now.
+        startGrazing(tab.id);
     }
 
     // about:blank rather than nothing: a page has to exist for the renderer to
@@ -417,6 +569,9 @@ QString AnoaBrowser::finishNewTab(Tab &tab, const QUrl &url)
 
 bool AnoaBrowser::closeTab(const QString &id)
 {
+    // First: a timer left running would fire at a tab that is no longer there.
+    stopGrazing(id);
+
     const int idx = indexOf(id);
     if (idx < 0)
         return false;
@@ -458,7 +613,14 @@ bool AnoaBrowser::selectTab(const QString &id)
     if (m_activeTabId == id)
         return true;
 
+    // The arriving tab has to be awake before it is raised, or the window
+    // shows a blank page; the one being left behind starts its clock.
+    const QString previous = m_activeTabId;
+    wakeTab(id);
     m_activeTabId = id;
+    stopGrazing(id);
+    if (!previous.isEmpty() && previous != id)
+        startGrazing(previous);
     m_tabs.at(idx).view->raise();
     m_tabs.at(idx).view->setFocus();
 

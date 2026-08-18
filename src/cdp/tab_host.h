@@ -31,6 +31,10 @@ public:
     // confused: a Chromium target id changes when a page is recreated.
     virtual QString targetIdFor(const QString &tabId) const = 0;
     virtual QString tabIdForTargetId(const QString &targetId) const = 0;
+    // Wake a tab that --graze put to sleep, and restart its idle clock. A
+    // no-op when grazing is off or the tab is already awake, so callers do not
+    // have to know which. Blocks until the page is usable.
+    virtual void wakeTab(const QString &tabId) = 0;
 
     // An id or a name to the id it means, or empty for neither.
     virtual QString resolveTab(const QString &idOrName) const = 0;
