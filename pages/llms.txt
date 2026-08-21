@@ -17,7 +17,7 @@ Also packaged as a Nix flake for x86_64-linux, aarch64-linux and aarch64-darwin
 has no qtwebengine for x86_64-darwin, so Intel Macs use Homebrew. Flakes are
 still experimental, so a fresh Nix needs `experimental-features = nix-command
 flakes` in ~/.config/nix/nix.conf before any of those commands work.
-`anoa terminal` is POSIX-only. Latest release: v0.12.0.
+`anoa terminal` is POSIX-only. Latest release: v0.13.0.
 
 ## Start here
 
