@@ -369,6 +369,39 @@ private slots:
         QCOMPARE(runParseArgs({}).cfg["maxRenderers"].toInt(), 0);
     }
 
+    // CFG-25: --proxy. A bare host:port is what people type and what Chromium
+    // accepts, but QUrl reads "127.0.0.1:8080" as scheme "127.0.0.1", so the
+    // scheme is filled in before validating and the stored value is normalised.
+    // Anything that is not a proxy scheme is refused up front: Chromium would
+    // take it, fail every request, and blame the site.
+    void testProxyIsValidatedAndNormalised()
+    {
+        QCOMPARE(runParseArgs({"--proxy", "ftp://h:1"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--proxy", "://broken"}).exitCode, 1);
+        QCOMPARE(runParseArgs({"--proxy", ""}).exitCode, 1);
+
+        const ParseResult bare = runParseArgs({"--proxy", "1.2.3.4:8080"});
+        QCOMPARE(bare.exitCode, 0);
+        QCOMPARE(bare.cfg["proxyUrl"].toString(), QString("http://1.2.3.4:8080"));
+
+        const ParseResult socks = runParseArgs({"--proxy", "socks5://1.2.3.4:1080"});
+        QCOMPARE(socks.exitCode, 0);
+        QCOMPARE(socks.cfg["proxyUrl"].toString(), QString("socks5://1.2.3.4:1080"));
+
+        // Credentials survive parsing: they are answered from the auth signal
+        // rather than put on Chromium's command line, so they must be kept.
+        const ParseResult creds = runParseArgs({"--proxy", "http://bob:s3cret@p.example:3128"});
+        QCOMPARE(creds.exitCode, 0);
+        QCOMPARE(creds.cfg["proxyUrl"].toString(),
+                 QString("http://bob:s3cret@p.example:3128"));
+
+        const ParseResult bypass =
+            runParseArgs({"--proxy", "1.2.3.4:8080", "--proxy-bypass", "localhost,*.internal"});
+        QCOMPARE(bypass.cfg["proxyBypass"].toString(), QString("localhost,*.internal"));
+
+        QCOMPARE(runParseArgs({}).cfg["proxyUrl"].toString(), QString());
+    }
+
     // TERM-CFG-12: --term-port and --fps reject a non-numeric value before the
     // range check ever runs. TERM-CFG-05/06/07 already cover the range refusals
     // (--term-port 0 and 70000, --fps 0); this is the branch above them.
@@ -624,6 +657,8 @@ static bool runHarnessIfRequested(int argc, char *argv[])
             {"profileName", cfg.profileName},
             {"width", cfg.width},
             {"maxRenderers", cfg.maxRenderers},
+            {"proxyUrl", cfg.proxyUrl},
+            {"proxyBypass", cfg.proxyBypass},
             {"height", cfg.height},
             {"extensionPaths", QJsonArray::fromStringList(cfg.extensionPaths)},
         };

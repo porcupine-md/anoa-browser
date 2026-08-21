@@ -42,6 +42,7 @@
         <li><a href="#start">Starting a browser</a></li>
         <li><a href="#reaching">Reaching one</a></li>
         <li><a href="#sessions">Sessions and profiles</a></li>
+        <li><a href="#proxy">Proxy</a></li>
         <li><a href="#memory">Memory, many tabs</a></li>
         <li><a href="#terminal-opts">Terminal viewer</a></li>
       </ul>
@@ -214,6 +215,8 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
             <tr><td><code>--profile-dir &lt;dir&gt;</code></td><td>Where profiles live</td></tr>
             <tr><td><code>--ephemeral</code></td><td>Keep nothing: no cookies, no storage, gone when the process ends</td></tr>
             <tr><td><code>--download-dir &lt;dir&gt;</code></td><td>Where downloads are saved. Default is the platform's Downloads folder</td></tr>
+            <tr><td><code>--proxy &lt;url&gt;</code></td><td><code>host:port</code> or <code>scheme://host:port</code> — <code>http</code>, <code>https</code>, <code>socks5</code>, <code>socks4</code>. Credentials go in the URL. See <a href="#proxy">Going through a proxy</a></td></tr>
+            <tr><td><code>--proxy-bypass &lt;list&gt;</code></td><td>Hosts that skip the proxy, comma separated</td></tr>
             <tr><td><code>--max-renderers &lt;n&gt;</code></td><td>Cap Chromium renderer processes. Chromium gives each tab its own, which is where the memory goes; fewer processes is less memory and less parallelism — see <a href="#memory">Memory with many tabs</a></td></tr>
             <tr><td><code>--extension &lt;path&gt;</code></td><td>Load an unpacked Chromium extension (manifest v2). Repeatable</td></tr>
             <tr><td><code>--auth-token &lt;secret&gt;</code></td><td>Require this bearer token on CDP and on the HTTP endpoints</td></tr>
@@ -276,6 +279,31 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
         <p style="margin-top:16px">Tabs share one jar unless asked otherwise, which is what
         makes two logins to the same site possible at once — see
         <code>tab new --profile</code> and <code>--isolated</code> below.</p>
+      </section>
+
+      <section id="proxy">
+        <h2>Going through a proxy</h2>
+        <p>The proxy belongs to the browser, and every tab in it goes through it.</p>
+<pre class="term"><span class="p">$</span> anoa --headless --port 9222 --proxy http://proxy.example:3128
+<span class="p">$</span> anoa --headless --port 9222 --proxy socks5://127.0.0.1:1080
+<span class="p">$</span> anoa --headless --port 9222 \
+      --proxy <b>http://user:pass@proxy.example:3128</b> \
+      --proxy-bypass <b>"localhost,127.0.0.1,*.internal"</b></pre>
+        <p style="margin-top:16px"><code>--proxy</code> takes <code>host:port</code> or
+        <code>scheme://host:port</code>, where the scheme is <code>http</code>,
+        <code>https</code>, <code>socks5</code> or <code>socks4</code>; a bare host gets
+        <code>http://</code>. Anything else is refused at startup rather than accepted and
+        then failing every request with a message that blames the site.</p>
+        <p>Credentials go in the URL. Chromium's own <code>--proxy-server</code> takes none,
+        so anoa passes it the origin and answers the proxy's authentication challenge itself
+        — without that a password-protected proxy simply hangs, and nothing in the page says
+        a password was wanted.</p>
+        <div class="note">
+          <p><strong>There is no per-tab proxy.</strong> Chromium keeps proxy settings per
+          process and Qt exposes no way to vary them per page — there is no proxy API on
+          <code>QWebEngineProfile</code> at all. Two proxies means two browsers on two ports,
+          addressed with <code>--port</code>.</p>
+        </div>
       </section>
 
       <section id="memory">

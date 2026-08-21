@@ -60,7 +60,13 @@ rather than by a person.
 
 ## Options
 
-- Starting a browser: `--port`, `--headless`, `--no-sandbox`, `--width`, `--height`, `--profile`, `--profile-dir`, `--ephemeral`, `--download-dir`, `--extension`, `--auth-token`, `--embed-origin`, `--max-renderers`, `--config`
+- Starting a browser: `--port`, `--headless`, `--no-sandbox`, `--width`, `--height`, `--profile`, `--profile-dir`, `--ephemeral`, `--download-dir`, `--extension`, `--auth-token`, `--embed-origin`, `--max-renderers`, `--proxy`, `--proxy-bypass`, `--config`
+
+`--proxy` takes `host:port` or `scheme://host:port` (http, https, socks5,
+socks4), with credentials in the URL; `--proxy-bypass` lists hosts that skip
+it. The proxy belongs to the browser and every tab uses it — there is no
+per-tab proxy, because Chromium keeps proxy settings per process and Qt
+exposes none per page. Two proxies means two browsers on two ports.
 
 Memory scales with tabs because Chromium runs a renderer process per tab:
 measured, nine tabs cost 1031 MB of renderers against 117 MB for one, while the

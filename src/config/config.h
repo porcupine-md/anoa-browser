@@ -22,6 +22,12 @@ struct Config {
     // means roughly one per tab. Lower numbers trade parallelism for memory —
     // see the comment in anoa_browser.cpp where it is applied.
     int maxRenderers = 0;
+    // --proxy. Held whole, credentials included: Chromium's --proxy-server
+    // takes no user:pass, so the host part goes on the command line and the
+    // credentials are answered from proxyAuthenticationRequired instead.
+    QString proxyUrl;
+    // Hosts that skip the proxy. Chromium's own list syntax, passed through.
+    QString proxyBypass;
     // Origins allowed to put the live view (/render) in an iframe. Empty means
     // 'self' only, because the view forwards input as well as showing pixels —
     // a page that can frame it can drive the browser. "*" opts out entirely.

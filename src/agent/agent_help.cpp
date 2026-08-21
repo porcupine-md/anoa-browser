@@ -32,6 +32,9 @@ const Group kGroups[] = {
     --embed-origin <origin>         let this origin iframe the live view at
                                     /render (repeatable; default same-origin)
     --download-dir <dir>            where downloads land (default: Downloads)
+    --proxy <url>                   route the browser through a proxy:
+                                    host:port, or scheme://user:pass@host:port
+    --proxy-bypass <list>           hosts that skip it, comma separated
     --max-renderers <n>             cap Chromium renderer processes; fewer
                                     processes is less memory, less parallelism
     --config <file>                 JSON or INI file of the above

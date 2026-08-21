@@ -437,6 +437,33 @@ request interception — `anoa network` observes, it cannot block or rewrite.
 
 ---
 
+## Going through a proxy
+
+The proxy belongs to the browser, and every tab in it goes through it.
+
+```bash
+anoa --headless --port 9222 --proxy http://proxy.example:3128 &
+anoa --headless --port 9222 --proxy socks5://127.0.0.1:1080 &
+anoa --headless --port 9222 --proxy http://user:pass@proxy.example:3128 \
+     --proxy-bypass "localhost,127.0.0.1,*.internal" &
+```
+
+`--proxy` takes `host:port` or `scheme://host:port`, where the scheme is `http`,
+`https`, `socks5` or `socks4`; a bare host gets `http://`. Anything else is
+refused at startup rather than accepted and then failing every request with a
+message that blames the site.
+
+Credentials go in the URL. Chromium's own `--proxy-server` takes none, so anoa
+passes it the origin and answers the proxy's authentication challenge itself —
+without that a password-protected proxy simply hangs, with nothing in the page
+to say a password was wanted.
+
+**There is no per-tab proxy.** Chromium keeps proxy settings per process and Qt
+exposes no way to vary them per page, so two proxies means two browsers on two
+ports, addressed with `--port`.
+
+---
+
 ## Memory with many tabs
 
 Chromium gives every tab its own renderer process, and that is where the memory

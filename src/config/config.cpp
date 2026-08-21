@@ -169,6 +169,12 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     QCommandLineOption extensionOpt("extension", "Path to an unpacked extension directory (repeatable)", "path");
     QCommandLineOption authTokenOpt("auth-token", "Bearer token required for CDP WebSocket connections", "token");
     QCommandLineOption configOpt("config", "Path to JSON or INI config file", "file");
+    QCommandLineOption proxyOpt("proxy",
+        "Route the browser through a proxy: http://host:port, socks5://host:port, "
+        "or host:port. Credentials may be given as http://user:pass@host:port", "url");
+    QCommandLineOption proxyBypassOpt("proxy-bypass",
+        "Hosts that skip the proxy, comma separated, e.g. \"localhost,127.0.0.1,*.internal\"",
+        "list");
     QCommandLineOption maxRenderersOpt("max-renderers",
         "Cap Chromium renderer processes (default: one per tab). Trades parallelism for memory", "n");
     QCommandLineOption embedOriginOpt("embed-origin",
@@ -198,6 +204,8 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
     parser.addOption(authTokenOpt);
     parser.addOption(embedOriginOpt);
     parser.addOption(maxRenderersOpt);
+    parser.addOption(proxyOpt);
+    parser.addOption(proxyBypassOpt);
     parser.addOption(configOpt);
     parser.addOption(widthOpt);
     parser.addOption(heightOpt);
@@ -234,6 +242,27 @@ Config parseArgs(int /*argc*/, char * /*argv*/[], bool terminalMode)
         cfg.authToken = parser.value(authTokenOpt);
     if (parser.isSet(embedOriginOpt))
         cfg.embedOrigins = parser.values(embedOriginOpt);
+    if (parser.isSet(proxyOpt)) {
+        const QString raw = parser.value(proxyOpt).trimmed();
+        // A bare host:port is what most people type and what Chromium accepts,
+        // but QUrl reads "127.0.0.1:8080" as scheme "127.0.0.1". Give it a
+        // scheme before parsing so the check below tests the real thing.
+        const QString probe = raw.contains(QStringLiteral("://"))
+            ? raw : QStringLiteral("http://") + raw;
+        const QUrl u(probe);
+        static const QStringList kSchemes{QStringLiteral("http"), QStringLiteral("https"),
+                                          QStringLiteral("socks5"), QStringLiteral("socks4")};
+        if (raw.isEmpty() || !u.isValid() || u.host().isEmpty()
+            || !kSchemes.contains(u.scheme())) {
+            QTextStream err(stderr);
+            err << "Error: --proxy must be host:port or scheme://host:port, where scheme is "
+                << "http, https, socks5 or socks4; got " << raw << Qt::endl;
+            ::exit(1);
+        }
+        cfg.proxyUrl = probe;
+    }
+    if (parser.isSet(proxyBypassOpt))
+        cfg.proxyBypass = parser.value(proxyBypassOpt).trimmed();
     if (parser.isSet(maxRenderersOpt)) {
         bool ok = false;
         const int n = parser.value(maxRenderersOpt).toInt(&ok);

@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QAuthenticator>
 #include <QEventLoop>
 #include <QFile>
 #include <QKeyEvent>
@@ -202,6 +203,20 @@ AnoaBrowser::AnoaBrowser(const Config &config, QWidget *parent)
     // process each and 1061 ms sharing four, because a shared process has one
     // main thread. Off by default; the caller decides where on that curve they
     // want to sit.
+    // Chromium's --proxy-server takes no credentials, so only the origin goes
+    // here. Anything in the userinfo is answered from proxyAuthenticationRequired
+    // below — a proxy that wants a password and never gets one simply hangs, with
+    // nothing in the page to say why.
+    if (!m_config.proxyUrl.isEmpty()) {
+        const QUrl p(m_config.proxyUrl);
+        QString server = p.scheme() + QStringLiteral("://") + p.host();
+        if (p.port() > 0)
+            server += QStringLiteral(":") + QString::number(p.port());
+        flags += " --proxy-server=" + server.toUtf8();
+        if (!m_config.proxyBypass.isEmpty())
+            flags += " --proxy-bypass-list=" + m_config.proxyBypass.toUtf8();
+    }
+
     if (m_config.maxRenderers > 0)
         flags += " --renderer-process-limit=" + QByteArray::number(m_config.maxRenderers);
 
@@ -296,6 +311,24 @@ QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)
     auto *view = new QWebEngineView(this);
     acceptDownloadsOn(profile);
     auto *page = new AnoaPage(m_config.terminalMode, profile, view);
+
+    // Credentials for --proxy. Chromium asks once per proxy and caches the
+    // answer; leaving the signal unconnected means Qt cancels the request, so
+    // an authenticating proxy would fail every load with nothing in the page
+    // explaining that a password was wanted.
+    if (!m_config.proxyUrl.isEmpty()) {
+        const QUrl proxy(m_config.proxyUrl);
+        if (!proxy.userName().isEmpty()) {
+            connect(page, &QWebEnginePage::proxyAuthenticationRequired, this,
+                    [proxy](const QUrl &, QAuthenticator *auth, const QString &) {
+                        if (!auth)
+                            return;
+                        auth->setUser(proxy.userName());
+                        auth->setPassword(proxy.password());
+                    });
+        }
+    }
+
     // A popup becomes a background tab on the same profile: it is the same
     // session the opener belongs to, and putting it in front would interrupt
     // whoever is driving the active tab.

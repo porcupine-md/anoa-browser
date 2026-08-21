@@ -155,6 +155,19 @@ anoa tab new example.com --isolated       # its own cookies, gone with the tab
 anoa tab new example.com --profile work   # its own cookies, kept on disk
 ```
 
+**A proxy belongs to the browser, not to a tab.** Set it when you start one:
+
+```bash
+anoa --headless --port 9222 --proxy http://user:pass@proxy.example:3128 &
+anoa --headless --port 9222 --proxy socks5://127.0.0.1:1080 \
+     --proxy-bypass "localhost,127.0.0.1,*.internal" &
+```
+
+Every tab in that browser goes through it — there is no per-tab proxy, because
+Chromium keeps proxy settings per process and Qt exposes no way to vary them per
+page. If you need two tabs on two different proxies, start two browsers on
+different ports and address them with `--port`.
+
 ## Things a page does that used to fail quietly
 
 `alert`, `confirm` and `prompt` are answered and recorded rather than shown:
@@ -192,6 +205,23 @@ somewhere else. `--tab <id>` picks which tab to act on; without it every command
 acts on the active tab.
 
 `<target>` below is either a ref from a snapshot (`@e2`) or any CSS selector.
+
+## Starting the browser
+
+| Flag | Does |
+|---|---|
+| `--headless` | no window, no display server needed |
+| `--port <n>` | which port to listen on (default 9222) |
+| `--profile <name>` | a named profile with its own cookies and storage |
+| `--ephemeral` | keep nothing; gone when the process ends |
+| `--proxy <url>` | `host:port`, or `scheme://user:pass@host:port` with `http`, `https`, `socks5`, `socks4` |
+| `--proxy-bypass <list>` | hosts that skip the proxy, comma separated |
+| `--max-renderers <n>` | cap renderer processes: less memory, less parallelism |
+| `--download-dir <dir>` | where downloads land |
+
+The proxy is a property of the browser, not of a tab: every tab in one browser
+uses it, and there is no per-tab proxy. Two proxies means two browsers on two
+ports.
 
 ## Tabs
 
