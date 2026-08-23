@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include <QJsonArray>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
@@ -31,6 +32,11 @@ public:
     // confused: a Chromium target id changes when a page is recreated.
     virtual QString targetIdFor(const QString &tabId) const = 0;
     virtual QString tabIdForTargetId(const QString &targetId) const = 0;
+
+    // Downloads this browser has accepted, newest last, as the JSON both the
+    // HTTP endpoint and the CDP extension hand back. JSON rather than a struct
+    // so this header keeps naming nothing from WebEngine.
+    virtual QJsonArray downloadsJson() const = 0;
 
     // An id or a name to the id it means, or empty for neither.
     virtual QString resolveTab(const QString &idOrName) const = 0;

@@ -39,6 +39,23 @@ QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *pa
         return handleBrowser(cmd);
     if (domain == QLatin1String("Target"))
         return handleTarget(cmd, tabs, deferred, sendLater);
+    // anoa's own domain. Downloads are browser state, so Runtime.evaluate — how
+    // the agent CLI reads almost everything else — cannot see them. Dispatched
+    // here beside the other domains rather than inside one of them, which is
+    // where it does not get reached.
+    if (domain == QLatin1String("Anoa")) {
+        if (method == QLatin1String("Anoa.getDownloads")) {
+            // Built here rather than through cdpResult(), which lives in the
+            // anonymous namespace further down and is not visible yet.
+            QJsonObject result;
+            result[QStringLiteral("downloads")] = tabs ? tabs->downloadsJson() : QJsonArray();
+            QJsonObject resp;
+            resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
+            resp[QStringLiteral("result")] = result;
+            return QJsonDocument(resp).toJson(QJsonDocument::Compact);
+        }
+        return QString(); // unknown Anoa.* falls through and is reported as such
+    }
     if (method == QLatin1String("Page.printToPDF")) {
         // Only use Qt's PdfHandler when we have a page reference.
         // Without a page (e.g. in the proxy path), pass through to Chromium which

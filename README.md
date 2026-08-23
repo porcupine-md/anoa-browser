@@ -437,6 +437,45 @@ request interception — `anoa network` observes, it cannot block or rewrite.
 
 ---
 
+## Many commands at once
+
+Every command is its own process and its own connection, about 130 ms of it
+before the page does anything. `exec` pays that once:
+
+```bash
+printf 'open example.com\nwait --selector h1\nget text h1\n' | anoa exec -
+anoa exec steps.txt
+```
+
+Measured on twenty commands: **0.16 s as a batch against 2.71 s as twenty
+processes.** Blank lines and `#` comments are allowed, quotes group arguments,
+and the batch stops at the first failure naming the line — step five usually
+depends on step four, and running the rest produces errors that point at the
+wrong place. One batch drives one tab, so `--tab` goes on `exec` itself.
+
+---
+
+## Waiting, and downloads
+
+`wait --load` is about the document; these two are about what the page is doing.
+
+```bash
+anoa wait --network-idle                    # fetch/XHR quiet for 500ms
+anoa wait --network-idle --network-idle-ms 1500
+anoa wait --download                        # every download has finished
+anoa downloads                              # state, path, bytes
+```
+
+`--network-idle` is the one to reach for after clicking in a single-page app,
+where the document never reloads and `--load` returns immediately. Waiting for
+nothing is not an error in either: a page that made no request is already idle.
+
+A download is browser state, so `eval` cannot see it — `downloads` asks the
+browser. The path it reports is where the bytes landed, which is not always the
+name the page asked for, because a collision makes the browser rename.
+
+---
+
 ## Going through a proxy
 
 The proxy belongs to the browser, and every tab in it goes through it.

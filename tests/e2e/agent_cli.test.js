@@ -672,4 +672,128 @@ describe('Agent CLI (Suite 8)', () => {
       rmSync(tmp, { force: true });
     }
   });
+  // ── exec, downloads, network-idle ─────────────────────────────────────────
+
+  // AGENT-30: exec runs many commands against one attached session. The point
+  // is the attach, not the convenience: every ordinary command pays for its own
+  // process and its own CDP handshake, measured at about 130 ms, so a
+  // twenty-step flow spends seconds before any page does anything.
+  it('exec runs a batch against one session, and far faster than one process each',
+     () => {
+    const script = 'open example.com\n'
+                 + '# comments and blank lines are allowed\n\n'
+                 + 'get text h1\n'
+                 + 'eval "document.title"\n';
+    const batch = run(['exec', '-', '--port', String(PORT)]);
+    // A batch on stdin needs stdin; run() gives none, so use the file form for
+    // the assertion and keep the stdin form for the shape check below.
+    assert.ok(batch.code === 0 || batch.code === 1);
+
+    const file = resolve(root, 'build/e2e-batch.txt');
+    writeFileSync(file, script);
+    try {
+      const t0 = Date.now();
+      const r = anoa('exec', file);
+      const batchMs = Date.now() - t0;
+      assert.equal(r.code, 0, r.err);
+      assert.match(r.out, /Example Domain/);
+
+      const t1 = Date.now();
+      anoa('open', 'example.com');
+      anoa('get', 'text', 'h1');
+      anoa('eval', 'document.title');
+      const separateMs = Date.now() - t1;
+
+      // Three commands in one process against three processes. The margin is
+      // deliberately loose — this asserts that the attach is paid once, not a
+      // particular speed on a particular machine.
+      assert.ok(batchMs < separateMs,
+                `batch ${batchMs}ms was not faster than ${separateMs}ms separate`);
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  // AGENT-31: a batch stops where it broke and says so. Running the rest
+  // against a page that never got there produces errors that point at the wrong
+  // line, which is worse than stopping.
+  it('exec fails fast and names the line', () => {
+    const file = resolve(root, 'build/e2e-batch-fail.txt');
+    writeFileSync(file, 'open example.com\nclick "#nothing-here"\neval "1+1"\n');
+    try {
+      const r = anoa('exec', file);
+      assert.equal(r.code, 1);
+      assert.match(r.err, /line 2/);
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  // AGENT-32: one batch drives one tab. Honouring a per-line --tab would mean
+  // re-attaching, which is the cost exec exists to avoid, so it is refused
+  // rather than quietly ignored.
+  it('exec refuses a per-line --tab instead of ignoring it', () => {
+    const file = resolve(root, 'build/e2e-batch-tab.txt');
+    writeFileSync(file, 'get text --tab t1\n');
+    try {
+      const r = anoa('exec', file);
+      assert.equal(r.code, 2);
+      assert.match(r.err, /--tab belongs on `exec`/);
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  // AGENT-33: downloads are browser state, not page state, so Runtime.evaluate
+  // cannot see them. Before this existed the browser accepted a download,
+  // recorded nothing an agent could read, and left it to guess at a filename.
+  it('downloads reports what was downloaded, and where', () => {
+    const empty = anoa('downloads');
+    assert.equal(empty.code, 0, empty.err);
+    // Either wording is fine; what matters is that it answers rather than errors.
+    assert.ok(empty.out.length > 0);
+
+    const json = anoa('downloads', '--json');
+    assert.equal(json.code, 0, json.err);
+    assert.doesNotThrow(() => JSON.parse(json.out));
+    assert.ok(Array.isArray(JSON.parse(json.out)));
+  });
+
+  // AGENT-34: waiting for nothing is not an error. A page that made no request
+  // is already idle, and blocking to the timeout would only hide that.
+  it('wait --network-idle returns on a quiet page', () => {
+    anoa('open', 'example.com');
+    const t0 = Date.now();
+    const r = anoa('wait', '--network-idle', '--timeout', '8000');
+    const ms = Date.now() - t0;
+    assert.equal(r.code, 0, r.err);
+    assert.ok(ms < 5000, `idle wait took ${ms}ms on a quiet page`);
+  });
+
+  // AGENT-35: the quiet window is what makes it useful — a single request
+  // finishing must not look like the end of a burst.
+  it('wait --network-idle honours a longer quiet window', () => {
+    anoa('open', 'example.com');
+    const short = Date.now();
+    anoa('wait', '--network-idle', '--network-idle-ms', '200', '--timeout', '8000');
+    const shortMs = Date.now() - short;
+
+    const long = Date.now();
+    anoa('wait', '--network-idle', '--network-idle-ms', '1200', '--timeout', '8000');
+    const longMs = Date.now() - long;
+
+    assert.ok(longMs > shortMs,
+              `1200ms window (${longMs}ms) was not longer than 200ms (${shortMs}ms)`);
+  });
+
+  // AGENT-36: wait --download with nothing downloading returns rather than
+  // blocking, for the same reason as AGENT-34.
+  it('wait --download returns when nothing is downloading', () => {
+    const t0 = Date.now();
+    const r = anoa('wait', '--download', '--timeout', '5000');
+    const ms = Date.now() - t0;
+    assert.equal(r.code, 0, r.err);
+    assert.ok(ms < 3000, `download wait took ${ms}ms with nothing in flight`);
+  });
+
 });

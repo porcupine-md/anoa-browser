@@ -749,6 +749,15 @@ int cmdWait(Session &s, QStringList args)
     QString selector = takeOption(args, QStringLiteral("--selector"));
     QString msText = takeOption(args, QStringLiteral("--ms"));
     const bool loadFlag = takeFlag(args, QStringLiteral("--load"));
+    // --network-idle takes an optional quiet window; bare means 500 ms, which
+    // is long enough that one request finishing does not look like the end of a
+    // burst, and short enough not to dominate the wait.
+    QString netIdleMs;
+    const bool netIdleFlag = takeFlag(args, QStringLiteral("--network-idle"));
+    if (netIdleFlag)
+        netIdleMs = takeOption(args, QStringLiteral("--network-idle-ms"), QStringLiteral("500"));
+    // --download waits for every download to leave in_progress.
+    const bool downloadFlag = takeFlag(args, QStringLiteral("--download"));
 
     // A bare positional is whichever of the two it looks like: `wait 500` is a
     // duration, `wait "#results"` is a selector. Safe to guess, because a
@@ -763,8 +772,38 @@ int cmdWait(Session &s, QStringList args)
     }
 
     const bool load = loadFlag
-                      || (selector.isEmpty() && msText.isEmpty() && text.isEmpty()
+                      || (!netIdleFlag && !downloadFlag && selector.isEmpty()
+                          && msText.isEmpty() && text.isEmpty()
                           && url.isEmpty() && fn.isEmpty());
+
+    // Downloads are browser state, so this one asks the browser rather than the
+    // page — Runtime.evaluate cannot see them.
+    if (downloadFlag) {
+        QElapsedTimer clock;
+        clock.start();
+        while (clock.elapsed() < budget) {
+            const CdpResult r = s.call(QStringLiteral("Anoa.getDownloads"));
+            if (!r.ok)
+                return fail(QStringLiteral("could not read downloads"));
+            const QJsonArray list = r.result.value(QStringLiteral("downloads")).toArray();
+            bool busy = false;
+            for (const QJsonValue &v : list) {
+                if (v.toObject().value(QStringLiteral("state")).toString()
+                    == QStringLiteral("in_progress")) {
+                    busy = true;
+                    break;
+                }
+            }
+            // No downloads at all counts as done: there is nothing to wait for,
+            // and blocking until the timeout would only hide that.
+            if (!busy)
+                return Ok;
+            QEventLoop loop;
+            QTimer::singleShot(100, &loop, &QEventLoop::quit);
+            loop.exec();
+        }
+        return fail(QStringLiteral("timed out after %1ms waiting for downloads").arg(budget));
+    }
 
     if (!msText.isEmpty()) {
         QEventLoop loop;
@@ -776,7 +815,10 @@ int cmdWait(Session &s, QStringList args)
     // One condition expressed as JavaScript, whichever flag asked for it, so
     // the poll loop below stays a single thing rather than a branch per form.
     QString probe, what;
-    if (load) {
+    if (netIdleFlag) {
+        probe = QStringLiteral("__anoa.netIdle(%1)").arg(netIdleMs.toInt());
+        what = QStringLiteral("the network to go quiet for %1ms").arg(netIdleMs);
+    } else if (load) {
         // `wait --load` after something that triggers a navigation is the case
         // that matters, and the obvious probe gets it wrong: the *old* document
         // is still `complete` while the new one is in flight, so the wait
@@ -1337,9 +1379,145 @@ bool isAgentCommand(const QString &verb)
         QStringLiteral("set"),    QStringLiteral("find"),     QStringLiteral("console"),
         QStringLiteral("errors"), QStringLiteral("network"),  QStringLiteral("mouse"),
         QStringLiteral("close"),  QStringLiteral("tab"),
-        QStringLiteral("upload"),
+        QStringLiteral("upload"), QStringLiteral("exec"), QStringLiteral("downloads"),
     };
     return verbs.contains(verb);
+}
+
+int dispatchVerb(Session &session, const QString &verb, QStringList args, bool json,
+                 const QString &host, int port);
+
+// `anoa downloads` — what the browser has downloaded, and how it went.
+//
+// The profile accepts downloads (Qt cancels any nobody accepts, silently) and
+// records them, because the signal fires once in that process and the agent
+// asking is a different process arriving later.
+static int cmdDownloads(Session &s, QStringList args, bool json)
+{
+    Q_UNUSED(args)
+    const CdpResult r = s.call(QStringLiteral("Anoa.getDownloads"));
+    if (!r.ok)
+        return fail(QStringLiteral("could not read downloads"));
+    const QJsonArray list =
+        r.result.value(QStringLiteral("downloads")).toArray();
+    if (json) {
+        out() << QString::fromUtf8(QJsonDocument(list).toJson(QJsonDocument::Compact))
+              << Qt::endl;
+        return Ok;
+    }
+    if (list.isEmpty()) {
+        out() << "no downloads" << Qt::endl;
+        return Ok;
+    }
+    for (const QJsonValue &v : list) {
+        const QJsonObject o = v.toObject();
+        const qint64 got = static_cast<qint64>(o.value(QStringLiteral("received")).toDouble());
+        const qint64 tot = static_cast<qint64>(o.value(QStringLiteral("total")).toDouble());
+        out() << o.value(QStringLiteral("state")).toString().leftJustified(12)
+              << o.value(QStringLiteral("path")).toString();
+        if (tot > 0)
+            out() << "  (" << got << "/" << tot << " bytes)";
+        out() << Qt::endl;
+    }
+    return Ok;
+}
+
+// Split one line of a batch the way a shell would, minus the parts a batch has
+// no use for: quotes group, a backslash escapes the next character, and nothing
+// else is special. No globbing, no variables, no subshells — a batch file is a
+// list of anoa commands, not a program.
+static QStringList tokenizeLine(const QString &line, bool *ok)
+{
+    QStringList out;
+    QString cur;
+    bool inTok = false, dq = false, sq = false;
+    for (int i = 0; i < line.size(); ++i) {
+        const QChar c = line.at(i);
+        if (c == QLatin1Char('\\') && i + 1 < line.size() && !sq) {
+            cur += line.at(++i);
+            inTok = true;
+            continue;
+        }
+        if (c == QLatin1Char('"') && !sq) { dq = !dq; inTok = true; continue; }
+        if (c == QLatin1Char('\'') && !dq) { sq = !sq; inTok = true; continue; }
+        if (c.isSpace() && !dq && !sq) {
+            if (inTok) { out << cur; cur.clear(); inTok = false; }
+            continue;
+        }
+        cur += c;
+        inTok = true;
+    }
+    if (inTok)
+        out << cur;
+    if (ok)
+        *ok = !dq && !sq;
+    return out;
+}
+
+// `anoa exec [file]` — run many commands against one attached browser.
+//
+// Every ordinary command is its own process and its own CDP attach, measured at
+// about 130 ms. A twenty-step flow therefore spends some two and a half seconds
+// attaching before any page does anything. This pays that once.
+int cmdExec(Session &session, QStringList args, bool json,
+            const QString &host, int port)
+{
+    QString source = args.isEmpty() ? QStringLiteral("-") : args.takeFirst();
+    QStringList lines;
+    if (source == QStringLiteral("-")) {
+        QTextStream in(stdin);
+        while (!in.atEnd())
+            lines << in.readLine();
+    } else {
+        QFile f(source);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+            return fail(QStringLiteral("cannot read %1").arg(source));
+        QTextStream in(&f);
+        while (!in.atEnd())
+            lines << in.readLine();
+    }
+
+    int lineNo = 0;
+    for (const QString &raw : lines) {
+        ++lineNo;
+        const QString line = raw.trimmed();
+        // Blank lines and # comments make a batch file readable, and a batch an
+        // agent generates is easier to debug when it can carry notes.
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
+            continue;
+
+        bool balanced = true;
+        QStringList tokens = tokenizeLine(line, &balanced);
+        if (!balanced)
+            return fail(QStringLiteral("line %1: unbalanced quote").arg(lineNo), Usage);
+        if (tokens.isEmpty())
+            continue;
+
+        // The session is attached to one tab, chosen once by `exec --tab`.
+        // Honouring a per-line --tab would mean re-attaching, which is the cost
+        // this command exists to avoid, so it is refused rather than ignored.
+        if (tokens.contains(QStringLiteral("--tab"))) {
+            return fail(QStringLiteral("line %1: --tab belongs on `exec` itself, not on a "
+                                       "command inside it — one batch drives one tab")
+                            .arg(lineNo),
+                        Usage);
+        }
+
+        const QString verb = tokens.takeFirst();
+        if (verb == QStringLiteral("exec"))
+            return fail(QStringLiteral("line %1: exec cannot nest").arg(lineNo), Usage);
+
+        const bool lineJson = json || tokens.contains(QStringLiteral("--json"));
+        const int rc = dispatchVerb(session, verb, tokens, lineJson, host, port);
+        // Fail fast: step five almost always depends on step four, and running
+        // the rest against a page that never got there wastes time and produces
+        // errors that point at the wrong line.
+        if (rc != Ok) {
+            err() << "anoa: batch stopped at line " << lineNo << ": " << line << Qt::endl;
+            return rc;
+        }
+    }
+    return Ok;
 }
 
 int runAgentCommand(const Config &config, const QString &verb, const QStringList &rawArgs)
@@ -1395,10 +1573,25 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
         return NoBrowser;
     }
 
+    if (verb == QStringLiteral("exec"))
+        return cmdExec(session, args, json, host, port);
+
+    return dispatchVerb(session, verb, args, json, host, port);
+}
+
+// The verb table, split out from runAgentCommand so `exec` can run it many
+// times against one attached session. Everything above the split is per-process
+// setup — argument parsing, and the CDP attach that costs about 130 ms — and
+// that is exactly what a batch is trying not to repeat.
+int dispatchVerb(Session &session, const QString &verb, QStringList args, bool json,
+                 const QString &host, int port)
+{
     if (verb == QStringLiteral("tab"))
         return cmdTab(session, args, json);
     if (verb == QStringLiteral("upload"))
         return cmdUpload(session, args, json);
+    if (verb == QStringLiteral("downloads"))
+        return cmdDownloads(session, args, json);
     if (verb == QStringLiteral("open") || verb == QStringLiteral("goto"))
         return cmdOpen(session, args, json);
     if (verb == QStringLiteral("snapshot"))

@@ -87,6 +87,9 @@ const Group kGroups[] = {
   anoa wait --text "<text>"         wait for text to appear on the page
   anoa wait --url "<fragment>"      wait for the url to contain something
   anoa wait --fn "<js>"             wait for a JS expression to be truthy
+  anoa wait --network-idle          wait for fetch/XHR to go quiet
+      --network-idle-ms <n>         how long quiet counts as quiet (default 500)
+  anoa wait --download              wait for downloads to finish
   anoa wait <css> --state hidden    wait for an element to go away
       --timeout <ms>                give up after this long (default 15000)
 
@@ -120,7 +123,8 @@ const Group kGroups[] = {
   anoa mouse down | up [x] [y]      press or release, for drags
   anoa mouse wheel <dy> [x] [y]     wheel at a position)"},
 
-    {"capture", "CAPTURE", R"(  anoa screenshot [file]            PNG of the viewport (default screenshot.png)
+    {"capture", "CAPTURE", R"(  anoa downloads                    what was downloaded, where, and how it went
+  anoa screenshot [file]            PNG of the viewport (default screenshot.png)
   anoa pdf [file]                   PDF of the page (default page.pdf))"},
 
     {"state", "STATE  — cookies, storage and emulation", R"(  anoa cookies                      list cookies
@@ -155,6 +159,8 @@ const Group kGroups[] = {
     {"agents", "AGENTS", R"(  anoa skills list                  what skill documents this binary carries
   anoa skills get core              the core workflow, for an agent to read
   anoa skills get commands          every command, with its arguments
+  anoa exec [file]                  run many commands on one connection; `-`
+                                    or no argument reads them from stdin
   anoa close                        ask the browser to exit
 
   Add --json to any command for machine-readable output.

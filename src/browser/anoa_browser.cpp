@@ -295,15 +295,69 @@ void AnoaBrowser::acceptDownloadsOn(QWebEngineProfile *profile)
                 QDir().mkpath(dir);
                 item->setDownloadDirectory(dir);
                 item->accept();
-                connect(item, &QWebEngineDownloadRequest::isFinishedChanged, this, [this, item]() {
+
+                // Recorded as well as accepted. downloadFinished fires once, in
+                // this process, and the agent asking about it is a different
+                // process that arrives afterwards — so the answer is kept.
+                DownloadRecord rec;
+                rec.url = item->url().toString();
+                rec.path = QDir(dir).filePath(item->downloadFileName());
+                rec.state = QStringLiteral("in_progress");
+                rec.total = item->totalBytes();
+                m_downloads.append(rec);
+                const int recIdx = m_downloads.size() - 1;
+
+                connect(item, &QWebEngineDownloadRequest::receivedBytesChanged, this,
+                        [this, item, recIdx]() {
+                            if (recIdx >= m_downloads.size())
+                                return;
+                            m_downloads[recIdx].received = item->receivedBytes();
+                            m_downloads[recIdx].total = item->totalBytes();
+                        });
+
+                connect(item, &QWebEngineDownloadRequest::isFinishedChanged, this,
+                        [this, item, recIdx]() {
                     if (!item->isFinished())
                         return;
+                    const bool ok =
+                        item->state() == QWebEngineDownloadRequest::DownloadCompleted;
+                    if (recIdx < m_downloads.size()) {
+                        // The name can change on the way: Chromium renames on a
+                        // collision, so the path recorded at the start is not
+                        // necessarily where the bytes landed.
+                        m_downloads[recIdx].path =
+                            QDir(item->downloadDirectory()).filePath(item->downloadFileName());
+                        m_downloads[recIdx].received = item->receivedBytes();
+                        m_downloads[recIdx].total = item->totalBytes();
+                        switch (item->state()) {
+                        case QWebEngineDownloadRequest::DownloadCompleted:
+                            m_downloads[recIdx].state = QStringLiteral("completed"); break;
+                        case QWebEngineDownloadRequest::DownloadCancelled:
+                            m_downloads[recIdx].state = QStringLiteral("cancelled"); break;
+                        default:
+                            m_downloads[recIdx].state = QStringLiteral("interrupted"); break;
+                        }
+                    }
                     emit downloadFinished(QDir(item->downloadDirectory())
                                               .filePath(item->downloadFileName()),
-                                          item->state()
-                                              == QWebEngineDownloadRequest::DownloadCompleted);
+                                          ok);
                 });
             });
+}
+
+QJsonArray AnoaBrowser::downloadsJson() const
+{
+    QJsonArray out;
+    for (const DownloadRecord &d : m_downloads) {
+        QJsonObject o;
+        o[QStringLiteral("url")] = d.url;
+        o[QStringLiteral("path")] = d.path;
+        o[QStringLiteral("state")] = d.state;
+        o[QStringLiteral("received")] = static_cast<double>(d.received);
+        o[QStringLiteral("total")] = static_cast<double>(d.total);
+        out.append(o);
+    }
+    return out;
 }
 
 QWebEngineView *AnoaBrowser::createView(QWebEngineProfile *profile)

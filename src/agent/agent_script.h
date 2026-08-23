@@ -21,7 +21,10 @@ inline QLatin1String agentScript()
 {
     return QLatin1String(R"JS(
 (function () {
-  if (window.__anoa && window.__anoa.v === 1) return "ready";
+  // Version, not mere presence: a page carrying an older helper from a previous
+  // build has to be upgraded, or every command added since then fails against a
+  // page that looks like it already has what it needs.
+  if (window.__anoa && window.__anoa.v === 2) return "ready";
 
   const INTERACTIVE = 'a[href],button,input,select,textarea,summary,' +
     '[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],' +
@@ -147,10 +150,14 @@ inline QLatin1String agentScript()
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         const method = (init && init.method) || (input && input.method) || 'GET';
         const started = Date.now();
+        api.inflight++;
+        const settle = () => { api.inflight--; api.lastNet = Date.now(); };
         return origFetch.apply(this, arguments).then(res => {
+          settle();
           push(api.requests, { url, method, status: res.status, ms: Date.now() - started, t: started });
           return res;
         }, err => {
+          settle();
           push(api.requests, { url, method, status: 0, error: String(err), ms: Date.now() - started, t: started });
           throw err;
         });
@@ -167,7 +174,10 @@ inline QLatin1String agentScript()
       const req = this.__anoaReq;
       if (req) {
         const started = Date.now();
+        api.inflight++;
         this.addEventListener('loadend', () => {
+          api.inflight--;
+          api.lastNet = Date.now();
           push(api.requests, { url: req.url, method: req.method, status: this.status,
                                ms: Date.now() - started, t: started });
         });
@@ -177,11 +187,16 @@ inline QLatin1String agentScript()
   }
 
   const api = {
-    v: 1,
+    v: 2,
     n: 0,
     logs: [],
     errors: [],
     requests: [],
+    // How many fetch/XHR calls are outstanding, and when the last one settled.
+    // `wait --network-idle` is these two and nothing else: a page is quiet when
+    // nothing is in flight and nothing has finished recently.
+    inflight: 0,
+    lastNet: 0,
 
     // Walks the document once, assigning a ref to every interactive element
     // that does not already carry one. Existing refs are preserved so an agent
@@ -394,6 +409,13 @@ inline QLatin1String agentScript()
     },
     network() {
       return { entries: api.requests, count: api.requests.length };
+    },
+    // Quiet for at least `ms`. lastNet starts at 0 so a page that has made no
+    // request at all is idle immediately, which is right: there is nothing to
+    // wait for.
+    netIdle(ms) {
+      if (api.inflight > 0) return false;
+      return Date.now() - api.lastNet >= ms;
     },
     clearHistory() {
       api.logs.length = 0;

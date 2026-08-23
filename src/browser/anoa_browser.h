@@ -87,6 +87,19 @@ public:
     // until resolution succeeds — a page exists a beat before its target does.
     QString chromiumTargetId(const QString &tabId) const;
 
+    // Every download this browser has accepted, newest last. The signal below
+    // fires once and is gone; an agent asks after the fact, from a different
+    // process, so the answer has to be kept somewhere it can be read.
+    struct DownloadRecord {
+        QString url;
+        QString path;
+        QString state;   // "in_progress" | "completed" | "interrupted" | "cancelled"
+        qint64 received = 0;
+        qint64 total = 0;
+    };
+    QList<DownloadRecord> downloads() const { return m_downloads; }
+    QJsonArray downloadsJson() const override;
+
     // What a test needs to see about profiles, without handing out the objects.
     QString profileNameFor(const QString &tabId) const;
     bool tabsShareProfile(const QString &a, const QString &b) const;
@@ -187,6 +200,7 @@ private:
     // profile OBJECT, so two tabs sharing a profile report one id and an
     // isolated tab reports its own.
     QSet<QWebEngineProfile *> m_downloadWired;
+    QList<DownloadRecord> m_downloads;
     QHash<QWebEngineProfile *, QString> m_contextIds;
     int m_nextContextId = 0;
     QString m_activeTabId;

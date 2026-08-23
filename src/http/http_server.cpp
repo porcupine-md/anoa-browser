@@ -588,6 +588,15 @@ void HttpServer::handleNewConnection()
         response += htmlBytes;
         socket->write(response);
         closeWhenSent(socket);
+    } else if (method == QLatin1String("GET") && path == QLatin1String("/render/downloads")) {
+        // Browser state, not page state, so it cannot come back through CDP's
+        // Runtime.evaluate like most of what the agent CLI reads.
+        if (!m_browser) {
+            sendResponse(socket, 503, "Service Unavailable", R"({"error":"no browser"})");
+            return;
+        }
+        sendResponse(socket, 200, "OK",
+                     QJsonDocument(m_browser->downloadsJson()).toJson(QJsonDocument::Compact));
     } else if (method == QLatin1String("GET") && path == QLatin1String("/render/viewport")) {
         // The logical size of the tab, which is the coordinate space every
         // input endpoint speaks. A client cannot infer it from the frame:

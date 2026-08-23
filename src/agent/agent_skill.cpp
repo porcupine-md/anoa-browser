@@ -168,6 +168,49 @@ Chromium keeps proxy settings per process and Qt exposes no way to vary them per
 page. If you need two tabs on two different proxies, start two browsers on
 different ports and address them with `--port`.
 
+## Many steps at once
+
+Every command is its own process and its own connection, which costs about
+130 ms before the page does anything. `exec` pays that once for a whole batch:
+
+```bash
+printf 'open example.com\nwait --selector h1\nget text h1\n' | anoa exec -
+anoa exec steps.txt                       # or from a file
+```
+
+Blank lines and `#` comments are allowed, quotes group arguments, and the batch
+stops at the first command that fails, naming the line. One batch drives one
+tab: put `--tab` on `exec` itself, not on the commands inside it.
+
+## Waiting for the right thing
+
+`wait --load` is about the document. Two others are about what the page is
+doing:
+
+```bash
+anoa wait --network-idle                  # fetch/XHR quiet for 500ms
+anoa wait --network-idle --network-idle-ms 1500
+anoa wait --download                      # every download has finished
+```
+
+`--network-idle` is what you want after clicking something in a single-page app,
+where the document never reloads. Waiting for nothing is not an error: a page
+that made no request is already idle, and returns at once.
+
+## Downloads
+
+A download is browser state, so `eval` cannot see it. Ask the browser:
+
+```bash
+anoa click @e4                            # something that downloads a file
+anoa wait --download
+anoa downloads                            # state, path, bytes
+```
+
+`--download-dir` at startup chooses where files land. The path reported by
+`downloads` is where the bytes actually went, which is not always the name the
+page asked for — a collision makes the browser rename.
+
 ## Things a page does that used to fail quietly
 
 `alert`, `confirm` and `prompt` are answered and recorded rather than shown:
@@ -222,6 +265,16 @@ acts on the active tab.
 The proxy is a property of the browser, not of a tab: every tab in one browser
 uses it, and there is no per-tab proxy. Two proxies means two browsers on two
 ports.
+
+## Batches
+
+| Command | Does |
+|---|---|
+| `exec [file]` | run many commands on one connection; `-` or nothing reads stdin |
+
+One attach for the whole batch instead of one per command. `#` comments and
+blank lines are skipped, quotes group arguments, and it stops at the first
+failure naming the line. `--tab` goes on `exec`, not on the lines inside it.
 
 ## Tabs
 
