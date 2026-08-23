@@ -52,6 +52,8 @@
         <li><a href="#navigate">Navigate</a></li>
         <li><a href="#inspect">Inspect</a></li>
         <li><a href="#interact">Interact</a></li>
+        <li><a href="#batches">Batches</a></li>
+        <li><a href="#downloads">Downloads</a></li>
         <li><a href="#capture">Capture</a></li>
         <li><a href="#state">State</a></li>
         <li><a href="#debug">Debug</a></li>
@@ -392,10 +394,22 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
 <span class="p">$</span> anoa wait --url "&lt;fragment&gt;"      <span class="o">wait for the url to contain something</span>
 <span class="p">$</span> anoa wait --fn "&lt;js&gt;"             <span class="o">wait for a JS expression to be truthy</span>
 <span class="p">$</span> anoa wait &lt;css&gt; --state hidden    <span class="o">wait for an element to go away</span>
+<span class="p">$</span> anoa wait --network-idle          <span class="o">fetch/XHR quiet (default 500ms)</span>
+      --network-idle-ms &lt;n&gt;       <span class="o">how long quiet counts as quiet</span>
+<span class="p">$</span> anoa wait --download              <span class="o">every download has finished</span>
       --timeout &lt;ms&gt;              <span class="o">give up after this long (default 15000)</span></pre>
         <p style="margin-top:16px">A bare argument is read as a duration when it is a number
         and as a selector otherwise, so <code>anoa wait 500</code> and
         <code>anoa wait "#results"</code> both do what they look like.</p>
+        <div class="note">
+          <p><strong><code>--network-idle</code> is the one for a single-page app.</strong>
+          <code>--load</code> is about the document, and in an app where the document never
+          reloads it returns at once. Idle means nothing outstanding and nothing finished in
+          the last N milliseconds — measured against a deliberately slow endpoint, a 1.2 s
+          request plus a 500 ms window returned in 1.79 s.</p>
+          <p>Waiting for nothing is not an error in either of the new waits: a page that made
+          no request is already idle, and blocking to the timeout would only hide that.</p>
+        </div>
       </section>
 
       <section id="inspect">
@@ -437,6 +451,46 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
           reported rather than clicked through, so you find out the click did not land instead
           of finding out later.</p>
         </div>
+      </section>
+
+      <section id="batches">
+        <h2>Batches — many commands, one connection</h2>
+        <p>Every command is its own process and its own connection, about 130 ms of it before
+        the page does anything. <code>exec</code> pays that once for a whole batch.</p>
+<pre class="term"><span class="p">$</span> printf 'open example.com\nwait --selector h1\nget text h1\n' | anoa exec -
+<span class="p">$</span> anoa exec steps.txt</pre>
+        <table class="ref">
+          <thead><tr><th>Measured, twenty commands</th><th>Time</th></tr></thead>
+          <tbody>
+            <tr><td>as one batch</td><td><strong>0.16 s</strong></td></tr>
+            <tr><td>as twenty processes</td><td>2.71 s</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:18px">Blank lines and <code>#</code> comments are skipped, quotes
+        group arguments, and the batch stops at the first command that fails, naming the line
+        — step five almost always depends on step four, and running the rest produces errors
+        that point at the wrong place.</p>
+        <div class="note">
+          <p><strong>One batch drives one tab.</strong> <code>--tab</code> goes on
+          <code>exec</code> itself; a <code>--tab</code> on a line inside is refused rather
+          than ignored, because honouring it would mean re-attaching — the cost this command
+          exists to avoid.</p>
+        </div>
+      </section>
+
+      <section id="downloads">
+        <h2>Downloads</h2>
+        <p>A download is browser state, so <code>eval</code> cannot see it. Ask the browser.</p>
+<pre class="term"><span class="p">$</span> anoa click @e4                    <span class="o">something that downloads a file</span>
+<span class="p">$</span> anoa wait --download
+<span class="p">$</span> anoa downloads                    <span class="o">state, path, bytes</span>
+<span class="o">completed   /home/you/Downloads/report.pdf  (284120/284120 bytes)</span></pre>
+        <p style="margin-top:16px"><code>--download-dir</code> at startup chooses where files
+        land. The path <code>downloads</code> reports is where the bytes actually went, which
+        is not always the name the page asked for: a collision makes the browser rename.</p>
+        <p>Add <code>--json</code> for the same list as an array, with
+        <code>url</code>, <code>path</code>, <code>state</code>, <code>received</code> and
+        <code>total</code>.</p>
       </section>
 
       <section id="capture">

@@ -17,7 +17,7 @@ Also packaged as a Nix flake for x86_64-linux, aarch64-linux and aarch64-darwin
 has no qtwebengine for x86_64-darwin, so Intel Macs use Homebrew. Flakes are
 still experimental, so a fresh Nix needs `experimental-features = nix-command
 flakes` in ~/.config/nix/nix.conf before any of those commands work.
-`anoa terminal` is POSIX-only. Latest release: v0.13.0.
+`anoa terminal` is POSIX-only. Latest release: v0.14.0.
 
 ## Start here
 
@@ -40,6 +40,17 @@ anoa wait --selector ".results"
 anoa screenshot page.png
 ```
 
+`exec` matters for latency: each ordinary command is a separate process and a
+separate CDP attach, about 130 ms, so twenty commands cost 2.71 s as processes
+against 0.16 s as one batch. It stops at the first failure, naming the line,
+and drives one tab — `--tab` goes on `exec`, not on the lines inside it.
+
+`wait --network-idle` is the wait for a single-page app, where `--load`
+returns at once because the document never reloads. Idle means no fetch/XHR
+outstanding and none finished in the last N ms (500 by default). `wait
+--download` waits for downloads; both return immediately when there is
+nothing to wait for.
+
 Add `--json` to any command for machine-readable output. Exit codes: `0` ok,
 `1` command failed, `2` usage, `3` no browser listening.
 
@@ -49,10 +60,12 @@ rather than by a person.
 
 ## Commands
 
-- Navigate: `open`, `back`, `forward`, `reload`, `wait` (`--load`, `--selector`, `--ms`, `--text`, `--url`, `--fn`, `--state hidden`, `--timeout`)
+- Navigate: `open`, `back`, `forward`, `reload`, `wait` (`--load`, `--selector`, `--ms`, `--text`, `--url`, `--fn`, `--state hidden`, `--network-idle`, `--network-idle-ms`, `--download`, `--timeout`)
 - Inspect: `snapshot [-i]`, `find role|text|selector [--nth]`, `get text|html|value|attr`, `eval`, `status`
 - Interact: `click`, `fill`, `type`, `upload`, `press`, `scroll`, `mouse move|down|up|wheel`
 - Capture: `screenshot [file]`, `pdf [file]`
+- Batches: `exec [file]` — many commands on one connection; `-` or nothing reads stdin
+- Downloads: `downloads` — state, path and bytes for everything the browser downloaded
 - Tabs: `tab new [url] [--name] [--profile] [--isolated]`, `tab list`, `tab select`, `tab close`
 - State: `cookies`, `storage local|session`, `set viewport|device|geo|offline|headers|media`
 - Debug: `console`, `errors`, `network` — recorded inside the page, so they cover what happened before the command ran
