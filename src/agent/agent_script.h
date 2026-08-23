@@ -186,6 +186,13 @@ inline QLatin1String agentScript()
     };
   }
 
+)JS"
+        // Split here, and only for MSVC's sake: a single string literal may not
+        // exceed 16380 bytes, and Windows checkouts turn every newline into
+        // CRLF, so 410 lines of script cross the limit there while building
+        // fine everywhere else. Adjacent literals concatenate, so this is one
+        // string to every compiler and two to the limit.
+        R"JS(
   const api = {
     v: 2,
     n: 0,
