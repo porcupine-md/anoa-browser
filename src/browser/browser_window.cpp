@@ -58,23 +58,49 @@ QWidget#anoaTabStrip {
     background: #E2E2E2;
     border-bottom: 1px solid #D0D0D0;
 }
-QToolButton#anoaTab {
+/* One tab is one widget carrying the background, with the label and the close
+   inside it. They used to be two siblings in a flat row: the close was
+   transparent, so on the active tab the label lit up and the x beside it did
+   not, and their paddings differed enough that the accessibility tree reported
+   108x21 next to 39x15 — a shorter, misaligned x floating between tabs rather
+   than belonging to one. */
+QWidget#anoaTab {
     background: #D8D8D8;
     border-right: 1px solid #C8C8C8;
+}
+QWidget#anoaTab[active="true"] { background: #F6F6F6; }
+
+QToolButton#anoaTabLabel {
+    background: transparent;
+    border: none;
     color: #4A4A4A;
-    padding: 3px 8px;
+    padding: 4px 4px 4px 10px;
+    text-align: left;
 }
-QToolButton#anoaTab[active="true"] {
-    background: #F6F6F6;
-    color: #101010;
+QWidget#anoaTab[active="true"] QToolButton#anoaTabLabel { color: #101010; }
+
+/* Narrow, full height, and quiet until you are on it. 39px of x was most of the
+   reason it read as its own button. */
+QToolButton#anoaTabClose {
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: #9A9A9A;
+    padding: 0;
+    margin: 4px 6px 4px 2px;
+    min-width: 16px;
+    max-width: 16px;
 }
-QToolButton#anoaTabClose, QToolButton#anoaTabNew {
+QToolButton#anoaTabClose:hover { background: #C0C0C0; color: #101010; }
+QWidget#anoaTab[active="true"] QToolButton#anoaTabClose:hover { background: #DADADA; }
+
+QToolButton#anoaTabNew {
     background: transparent;
     border: none;
     color: #7A7A7A;
-    padding: 0 6px;
+    padding: 0 10px;
 }
-QToolButton#anoaTabClose:hover, QToolButton#anoaTabNew:hover { color: #101010; }
+QToolButton#anoaTabNew:hover { color: #101010; }
 )";
 
 } // namespace
@@ -300,8 +326,17 @@ void BrowserWindow::rebuildTabStrip()
     const QString active = m_view->activeTabId();
 
     for (const QString &id : ids) {
-        auto *button = new QToolButton(m_tabStrip);
-        button->setObjectName(QStringLiteral("anoaTab"));
+        // The tab is the container; the label and the close live inside it, so
+        // the active background covers both and they read as one thing.
+        auto *tab = new QWidget(m_tabStrip);
+        tab->setObjectName(QStringLiteral("anoaTab"));
+        tab->setProperty("active", id == active);
+        auto *tabLayout = new QHBoxLayout(tab);
+        tabLayout->setContentsMargins(0, 0, 0, 0);
+        tabLayout->setSpacing(0);
+
+        auto *button = new QToolButton(tab);
+        button->setObjectName(QStringLiteral("anoaTabLabel"));
         QString label = m_view->titleFor(id);
         if (label.isEmpty())
             label = m_view->urlFor(id);
@@ -311,21 +346,26 @@ void BrowserWindow::rebuildTabStrip()
             label = label.left(23) + QStringLiteral("\xE2\x80\xA6"); // HORIZONTAL ELLIPSIS
         button->setText(label);
         button->setToolTip(id + QStringLiteral("  ") + m_view->urlFor(id));
-        button->setProperty("active", id == active);
         button->setCursor(Qt::ArrowCursor);
         connect(button, &QToolButton::clicked, this, [this, id]() { m_view->selectTab(id); });
-        m_tabStripLayout->addWidget(button);
+        tabLayout->addWidget(button);
+        m_tabStripLayout->addWidget(tab);
 
         // No close button on the last tab: the registry would refuse it, and
         // offering a control that cannot work is worse than not offering it.
         if (ids.size() > 1) {
-            auto *close = new QToolButton(m_tabStrip);
+            auto *close = new QToolButton(tab);
             close->setObjectName(QStringLiteral("anoaTabClose"));
             close->setText(QStringLiteral("\xC3\x97")); // MULTIPLICATION SIGN
             close->setToolTip(QStringLiteral("Close ") + id);
             close->setCursor(Qt::ArrowCursor);
+            // accessibleName as well as the tooltip: without it every close
+            // button reports as its neighbour, which makes the strip impossible
+            // to check from the outside and a screen reader announce the wrong
+            // tab.
+            close->setAccessibleName(QStringLiteral("Close ") + id);
             connect(close, &QToolButton::clicked, this, [this, id]() { m_view->closeTab(id); });
-            m_tabStripLayout->addWidget(close);
+            tabLayout->addWidget(close);
         }
     }
 
