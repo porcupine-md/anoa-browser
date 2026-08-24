@@ -526,6 +526,7 @@ void HttpServer::handleNewConnection()
             navUrl = QString::fromUtf8(bodyBytes.trimmed());
         }
 
+
         QUrl parsedUrl(navUrl);
         if (navUrl.isEmpty() || !parsedUrl.isValid() || parsedUrl.isRelative()) {
             sendResponse(socket, 400, "Bad Request", "invalid url", "text/plain");
