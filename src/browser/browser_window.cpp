@@ -58,23 +58,49 @@ QWidget#anoaTabStrip {
     background: #E2E2E2;
     border-bottom: 1px solid #D0D0D0;
 }
-QToolButton#anoaTab {
+/* One tab is one widget carrying the background, with the label and the close
+   inside it. They used to be two siblings in a flat row: the close was
+   transparent, so on the active tab the label lit up and the x beside it did
+   not, and their paddings differed enough that the accessibility tree reported
+   108x21 next to 39x15 — a shorter, misaligned x floating between tabs rather
+   than belonging to one. */
+QWidget#anoaTab {
     background: #D8D8D8;
     border-right: 1px solid #C8C8C8;
+}
+QWidget#anoaTab[active="true"] { background: #F6F6F6; }
+
+QToolButton#anoaTabLabel {
+    background: transparent;
+    border: none;
     color: #4A4A4A;
-    padding: 3px 8px;
+    padding: 4px 4px 4px 10px;
+    text-align: left;
 }
-QToolButton#anoaTab[active="true"] {
-    background: #F6F6F6;
-    color: #101010;
+QWidget#anoaTab[active="true"] QToolButton#anoaTabLabel { color: #101010; }
+
+/* Narrow, full height, and quiet until you are on it. 39px of x was most of the
+   reason it read as its own button. */
+QToolButton#anoaTabClose {
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: #9A9A9A;
+    padding: 0;
+    margin: 4px 6px 4px 2px;
+    min-width: 16px;
+    max-width: 16px;
 }
-QToolButton#anoaTabClose, QToolButton#anoaTabNew {
+QToolButton#anoaTabClose:hover { background: #C0C0C0; color: #101010; }
+QWidget#anoaTab[active="true"] QToolButton#anoaTabClose:hover { background: #DADADA; }
+
+QToolButton#anoaTabNew {
     background: transparent;
     border: none;
     color: #7A7A7A;
-    padding: 0 6px;
+    padding: 0 10px;
 }
-QToolButton#anoaTabClose:hover, QToolButton#anoaTabNew:hover { color: #101010; }
+QToolButton#anoaTabNew:hover { color: #101010; }
 )";
 
 } // namespace
@@ -249,7 +275,16 @@ void BrowserWindow::layoutToolbar()
 
     // The strip sits under the toolbar and shares its fate: both overlay the
     // page when auto-hide is on, and both are reserved for when it is off.
-    const bool stripVisible = m_tabStrip && m_tabStrip->isVisible();
+    // isHidden(), not isVisible(). isVisible() is false until the show event
+    // has actually been delivered, and rebuildTabStrip() calls setVisible()
+    // and then this function in the same turn — so the strip was measured
+    // before it counted as visible and laid out at zero height. Every tab
+    // button then inherited that: reported by the accessibility layer as
+    // 108x0, 170x0, 85x0. Present, addressable, and impossible to click.
+    //
+    // isHidden() reflects the explicit show/hide state immediately, which is
+    // the question being asked here.
+    const bool stripVisible = m_tabStrip && !m_tabStrip->isHidden();
     const int stripHeight = stripVisible ? m_tabStrip->sizeHint().height() : 0;
     if (m_tabStrip)
         m_tabStrip->setGeometry(0, barHeight, width(), stripHeight);
@@ -270,8 +305,20 @@ void BrowserWindow::rebuildTabStrip()
     // Torn down and rebuilt rather than patched: one button per tab is cheap,
     // and keeping a second model of which tabs exist is how the two drift.
     while (QLayoutItem *item = m_tabStripLayout->takeAt(0)) {
-        if (QWidget *w = item->widget())
+        if (QWidget *w = item->widget()) {
+            // Out of the widget tree now, not whenever the event loop gets to
+            // it. deleteLater alone leaves the old button a child of the strip:
+            // gone from the layout, so it keeps whatever geometry it last had,
+            // but still there to be hit-tested and still carrying its old
+            // handler. Rebuilding stacks them up — three closes all reading
+            // "Close t1" at one position — and a click meant for a tab lands on
+            // a leftover that closes the first one instead. deleteLater is
+            // still what frees it, because this can run from inside the very
+            // button's own clicked() handler.
+            w->hide();
+            w->setParent(nullptr);
             w->deleteLater();
+        }
         delete item;
     }
 
@@ -279,8 +326,17 @@ void BrowserWindow::rebuildTabStrip()
     const QString active = m_view->activeTabId();
 
     for (const QString &id : ids) {
-        auto *button = new QToolButton(m_tabStrip);
-        button->setObjectName(QStringLiteral("anoaTab"));
+        // The tab is the container; the label and the close live inside it, so
+        // the active background covers both and they read as one thing.
+        auto *tab = new QWidget(m_tabStrip);
+        tab->setObjectName(QStringLiteral("anoaTab"));
+        tab->setProperty("active", id == active);
+        auto *tabLayout = new QHBoxLayout(tab);
+        tabLayout->setContentsMargins(0, 0, 0, 0);
+        tabLayout->setSpacing(0);
+
+        auto *button = new QToolButton(tab);
+        button->setObjectName(QStringLiteral("anoaTabLabel"));
         QString label = m_view->titleFor(id);
         if (label.isEmpty())
             label = m_view->urlFor(id);
@@ -290,21 +346,26 @@ void BrowserWindow::rebuildTabStrip()
             label = label.left(23) + QStringLiteral("\xE2\x80\xA6"); // HORIZONTAL ELLIPSIS
         button->setText(label);
         button->setToolTip(id + QStringLiteral("  ") + m_view->urlFor(id));
-        button->setProperty("active", id == active);
         button->setCursor(Qt::ArrowCursor);
         connect(button, &QToolButton::clicked, this, [this, id]() { m_view->selectTab(id); });
-        m_tabStripLayout->addWidget(button);
+        tabLayout->addWidget(button);
+        m_tabStripLayout->addWidget(tab);
 
         // No close button on the last tab: the registry would refuse it, and
         // offering a control that cannot work is worse than not offering it.
         if (ids.size() > 1) {
-            auto *close = new QToolButton(m_tabStrip);
+            auto *close = new QToolButton(tab);
             close->setObjectName(QStringLiteral("anoaTabClose"));
             close->setText(QStringLiteral("\xC3\x97")); // MULTIPLICATION SIGN
             close->setToolTip(QStringLiteral("Close ") + id);
             close->setCursor(Qt::ArrowCursor);
+            // accessibleName as well as the tooltip: without it every close
+            // button reports as its neighbour, which makes the strip impossible
+            // to check from the outside and a screen reader announce the wrong
+            // tab.
+            close->setAccessibleName(QStringLiteral("Close ") + id);
             connect(close, &QToolButton::clicked, this, [this, id]() { m_view->closeTab(id); });
-            m_tabStripLayout->addWidget(close);
+            tabLayout->addWidget(close);
         }
     }
 
@@ -322,7 +383,26 @@ void BrowserWindow::rebuildTabStrip()
     // from it.
     const bool want = ids.size() > 1;
     m_tabStrip->setVisible(want && (!m_autoHide || m_toolbar->isVisible()));
+    // The buttons were added a moment ago and the layout has not recalculated,
+    // so sizeHint() still answers for the strip as it was — zero. layoutToolbar
+    // reads that sizeHint to decide the strip's height, which is how every tab
+    // button ended up 108x0: laid out, addressable, and impossible to click.
+    m_tabStripLayout->activate();
     layoutToolbar();
+
+    // And again once the event loop has turned. sizeHint() during a rebuild is
+    // not dependable: the buttons were created a moment ago and have not been
+    // polished, so the strip answers 0x0 as often as it answers its real
+    // height — measured going 21, then 0 again the next time a tab was added.
+    // Laying out twice costs nothing and is the difference between a strip you
+    // can click and one that is a zero-height line.
+    QTimer::singleShot(0, this, &BrowserWindow::layoutToolbar);
+
+    // The menu carries "Close tab", whose enabled state depends on how many
+    // tabs there are. This function is the one funnel every tab change already
+    // goes through, so the menu is refreshed here rather than from four call
+    // sites that would each have to remember.
+    rebuildMenu();
 }
 
 void BrowserWindow::setAutoHide(bool on)
@@ -408,6 +488,28 @@ void BrowserWindow::rebuildMenu()
     m_menu->addAction(QStringLiteral("Back"), m_view, &AnoaBrowser::back);
     m_menu->addAction(QStringLiteral("Forward"), m_view, &AnoaBrowser::forward);
     m_menu->addAction(QStringLiteral("Reload"), m_view, &AnoaBrowser::reload);
+    m_menu->addSeparator();
+    // The tab strip hides itself at one tab so a single-tab window stays plain,
+    // which left the "+" button reachable only once you already had two tabs —
+    // no way to open the second one from the window at all. These two are that
+    // way in, and the strip appears by itself the moment there is more than one.
+    QAction *newTab = m_menu->addAction(QStringLiteral("New tab"), this, [this]() {
+        const QString id = m_view->newTab();
+        if (!id.isEmpty())
+            m_view->selectTab(id);
+    });
+    newTab->setShortcut(QKeySequence::AddTab);
+
+    QAction *closeTab = m_menu->addAction(QStringLiteral("Close tab"), this, [this]() {
+        const QString id = m_view->activeTabId();
+        if (!id.isEmpty())
+            m_view->closeTab(id);
+    });
+    closeTab->setShortcut(QKeySequence::Close);
+    // The registry refuses the last tab, and a menu item that cannot work reads
+    // as a broken window rather than a deliberate rule.
+    closeTab->setEnabled(m_view->tabCount() > 1);
+
     m_menu->addSeparator();
     m_menu->addAction(QStringLiteral("Copy address"), this, [this]() {
         QGuiApplication::clipboard()->setText(m_view->url().toString());

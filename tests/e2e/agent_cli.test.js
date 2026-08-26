@@ -772,18 +772,32 @@ describe('Agent CLI (Suite 8)', () => {
 
   // AGENT-35: the quiet window is what makes it useful — a single request
   // finishing must not look like the end of a burst.
+  //
+  // A request has to happen first. Measured against a page that made none, both
+  // windows return at once and are indistinguishable: idle is "nothing
+  // outstanding and nothing finished recently", and on a silent page both halves
+  // are true from the start. An earlier version of this case did exactly that
+  // and passed on timing noise alone.
   it('wait --network-idle honours a longer quiet window', () => {
     anoa('open', 'example.com');
+
+    // Fetch anything; it is the completion that starts the clock. Cross-origin
+    // and rejected is fine — the helper counts a failed request as a finished
+    // one, which is the behaviour that matters here.
+    const kick = `fetch('http://127.0.0.1:${PORT}/json/version').catch(function(){})`;
+
+    anoa('eval', kick);
     const short = Date.now();
     anoa('wait', '--network-idle', '--network-idle-ms', '200', '--timeout', '8000');
     const shortMs = Date.now() - short;
 
+    anoa('eval', kick);
     const long = Date.now();
-    anoa('wait', '--network-idle', '--network-idle-ms', '1200', '--timeout', '8000');
+    anoa('wait', '--network-idle', '--network-idle-ms', '1500', '--timeout', '8000');
     const longMs = Date.now() - long;
 
-    assert.ok(longMs > shortMs,
-              `1200ms window (${longMs}ms) was not longer than 200ms (${shortMs}ms)`);
+    assert.ok(longMs > shortMs + 500,
+              `1500ms window (${longMs}ms) was not meaningfully longer than 200ms (${shortMs}ms)`);
   });
 
   // AGENT-36: wait --download with nothing downloading returns rather than

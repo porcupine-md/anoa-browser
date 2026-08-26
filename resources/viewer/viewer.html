@@ -102,7 +102,26 @@ body.embed #chrome{display:none}
   }
 
   function post(path, extra) {
-    return fetch(path + "?" + qs(extra), { method: "POST" }).catch(function () {});
+    return fetch(path + "?" + qs(extra), { method: "POST" }).then(function (r) {
+      // Swallowing this is what made a rejected address look like a dead
+      // button: the request 400'd, the catch below ate it, and the page simply
+      // did not move with nothing anywhere to say why.
+      if (!r.ok) flash(r.status === 400 ? "that address was refused" : "request failed");
+      return r;
+    }).catch(function () { flash("could not reach the browser"); });
+  }
+
+  // A short message over the view. The viewer has no console anyone is reading,
+  // and an agent-driven browser is often watched by someone who cannot open one.
+  var flashTimer = 0;
+  function flash(msg) {
+    hint.textContent = msg;
+    hint.classList.add("show");
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () {
+      hint.textContent = "click to give this view the keyboard";
+      if (document.activeElement === stage) hint.classList.remove("show");
+    }, 2500);
   }
 
   // ── the frame ────────────────────────────────────────────────────────────
@@ -347,12 +366,32 @@ body.embed #chrome{display:none}
   });
 
   // ── navigation ───────────────────────────────────────────────────────────
+  // What a person types has no scheme, and /render/navigate is strict on
+  // purpose — a client that posts "relative/path" deserves a 400 rather than a
+  // trip to a host that does not exist. So the rule lives here, at the address
+  // bar, which is the same place the terminal viewer and the desktop window
+  // each apply it. Without it, typing "example.org" 400'd and the page simply
+  // did not move.
+  //
+  // A scheme is letters, digits, +, - and . before a colon, and longer than one
+  // character; a digit straight after the colon is a port, so "localhost:8080"
+  // is a host and not a scheme.
+  function withScheme(typed) {
+    var colon = typed.indexOf(":");
+    if (colon > 1) {
+      var schemeLike = /^[A-Za-z0-9+.-]+$/.test(typed.slice(0, colon));
+      var portLike = /^[0-9]/.test(typed.slice(colon + 1));
+      if (schemeLike && !portLike) return typed;
+    }
+    return "https://" + typed;
+  }
+
   urlEl.addEventListener("keydown", function (ev) {
     if (ev.key !== "Enter") return;
     ev.stopPropagation();
     var v = urlEl.value.trim();
     if (!v) return;
-    post("/render/navigate", { url: v }).then(pollTabs);
+    post("/render/navigate", { url: withScheme(v) }).then(pollTabs);
   });
 
   document.getElementById("back").addEventListener("click", function () {
