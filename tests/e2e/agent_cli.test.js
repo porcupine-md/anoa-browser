@@ -811,3 +811,48 @@ describe('Agent CLI (Suite 8)', () => {
   });
 
 });
+
+// Issue #30. Its own describe with its own port and its own browser, because
+// the subject of the test is killing the browser and Suite 8 shares one.
+describe('Agent CLI — close (issue #30)', () => {
+  const CLOSE_PORT = PORT + 10;
+  let victim;
+
+  const closeAnoa = (...args) => run([...args, '--port', String(CLOSE_PORT)]);
+
+  before(async () => {
+    assert.ok(BIN, 'no built binary');
+    victim = spawn(BIN, ['--headless', '--no-sandbox', '--port', String(CLOSE_PORT)],
+                   { stdio: 'ignore' });
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      if (closeAnoa('status').code === 0) break;
+      assert.ok(Date.now() < deadline, `browser never came up on ${CLOSE_PORT}`);
+      await new Promise(r => setTimeout(r, 500));
+    }
+  });
+
+  after(() => {
+    if (victim) victim.kill('SIGKILL');
+  });
+
+  // AGENT-37: close has to mean closed. It reported exit 0 while the process,
+  // its renderers and the port all stayed up, so anything trusting the exit
+  // code left a whole browser engine running.
+  it('close stops the browser, and exit 0 means it is gone', async () => {
+    const r = closeAnoa('close');
+    assert.equal(r.code, 0, r.err);
+
+    // The exit code alone is the claim under test: by the time close returns,
+    // nothing may be listening.
+    assert.equal(closeAnoa('status').code, 3, 'port still answering after close');
+
+    // And the process itself is gone, not just its socket.
+    const exited = await Promise.race([
+      new Promise(res => victim.once('exit', () => res(true))),
+      new Promise(res => setTimeout(() => res(false), 10000)),
+    ]);
+    assert.ok(exited, 'the browser process outlived close');
+    victim = null;
+  });
+});

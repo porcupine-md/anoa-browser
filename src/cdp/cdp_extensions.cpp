@@ -2,9 +2,11 @@
 #include "cdp/tab_host.h"
 #include "pdf/pdf_handler.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTimer>
 
 static QString stubResult(const QJsonObject &cmd)
 {
@@ -114,6 +116,19 @@ QString CdpExtensions::handleBrowser(const QJsonObject &cmd)
     // "Browser context management is not supported". Pass everything else
     // (e.g. Browser.getVersion) through to Chromium.
     const QString method = cmd.value(QStringLiteral("method")).toString();
+    if (method == QLatin1String("Browser.close")) {
+        // Chromium answers Browser.close with an empty success and then keeps
+        // running: the browser it would close is one Qt owns and it has no
+        // handle on it. So `anoa close` exited 0 while the process and its
+        // renderers stayed alive — the failure mode this codebase specialises
+        // in, an endpoint reporting success without acting.
+        //
+        // Quit on a later turn of the event loop, not now: this reply still has
+        // to reach the socket. Unwinding main() from there is what destroys the
+        // profile, which is what flushes cookies — the same path SIGTERM takes.
+        QTimer::singleShot(150, qApp, &QCoreApplication::quit);
+        return stubResult(cmd);
+    }
     if (method == QLatin1String("Browser.setDownloadBehavior")
             || method == QLatin1String("Browser.getWindowForTarget")
             || method == QLatin1String("Browser.setWindowBounds")
