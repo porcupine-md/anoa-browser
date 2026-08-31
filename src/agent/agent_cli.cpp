@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QTcpSocket>
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
@@ -1641,7 +1642,25 @@ int dispatchVerb(Session &session, const QString &verb, QStringList args, bool j
         if (!r.ok)
             return fail(QStringLiteral("this browser cannot be closed over CDP — "
                                        "stop the process that started it"));
-        return Ok;
+        // The reply means the request was accepted, not that the browser is
+        // gone. Wait for the port to stop accepting connections, so exit 0 is
+        // a promise a script can act on — start another browser on this port,
+        // or check that nothing is left running.
+        QElapsedTimer since;
+        since.start();
+        while (since.elapsed() < 10000) {
+            QTcpSocket probe;
+            probe.connectToHost(host, static_cast<quint16>(port));
+            if (!probe.waitForConnected(500))
+                return Ok;
+            probe.abort();
+            QEventLoop tick;
+            QTimer::singleShot(100, &tick, &QEventLoop::quit);
+            tick.exec();
+        }
+        return fail(QStringLiteral("the browser accepted close but is still listening on %1:%2")
+                        .arg(host)
+                        .arg(port));
     }
 
     return fail(QStringLiteral("unknown command: %1").arg(verb), Usage);

@@ -412,7 +412,7 @@ subscribed to the events in time. Consequences worth knowing:
 | `anoa skills list` | what this binary carries |
 | `anoa skills get core` | the workflow: how to drive a page |
 | `anoa skills get commands` | this document |
-| `anoa close` | ask the browser to exit |
+| `anoa close` | stop the browser; exit 0 means the process is gone and the port is free |
 
 ## Not implemented
 

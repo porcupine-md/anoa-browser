@@ -161,7 +161,7 @@ const Group kGroups[] = {
   anoa skills get commands          every command, with its arguments
   anoa exec [file]                  run many commands on one connection; `-`
                                     or no argument reads them from stdin
-  anoa close                        ask the browser to exit
+  anoa close                        stop the browser; returns once it is gone
 
   Add --json to any command for machine-readable output.
   Exit codes: 0 ok · 1 command failed · 2 usage · 3 no browser listening)"},
