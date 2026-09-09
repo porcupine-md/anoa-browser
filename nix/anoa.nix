@@ -55,8 +55,13 @@ stdenv.mkDerivation (finalAttrs: {
   doCheck = true;
   checkPhase = ''
     runHook preCheck
-    QT_QPA_PLATFORM=offscreen ./anoa --version
+    QT_QPA_PLATFORM=offscreen ./${if stdenv.hostPlatform.isDarwin then "anoa.app/Contents/MacOS/anoa" else "anoa"} --version
     runHook postCheck
+  '';
+
+  postInstall = lib.optionalString stdenv.hostPlatform.isDarwin ''
+    mkdir -p $out/bin
+    ln -s $out/anoa.app/Contents/MacOS/anoa $out/bin/anoa
   '';
 
   meta = {
