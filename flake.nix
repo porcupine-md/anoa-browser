@@ -14,7 +14,7 @@
 
       # Keep this in step with CMakeLists.txt. It is passed to the build rather
       # than read from it, so `nix run` reports the same string a release does.
-      version = "0.15.1";
+      version = "0.15.2";
     in
     {
       packages = forEach (pkgs: rec {
