@@ -800,6 +800,76 @@ describe('Agent CLI (Suite 8)', () => {
               `1500ms window (${longMs}ms) was not meaningfully longer than 200ms (${shortMs}ms)`);
   });
 
+  // AGENT-38: `network` used to be fetch and XHR and nothing else, so the most
+  // basic question an agent asks — did the page I just opened actually load,
+  // and with what status — had no answer at all. An empty list looked
+  // identical to a page that made no requests.
+  it('network reports the document load, with its status', () => {
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+
+    const r = anoa('network', '--json');
+    assert.equal(r.code, 0, r.err);
+    const entries = JSON.parse(r.out).entries;
+
+    const doc = entries.find(e => e.kind === 'document');
+    assert.ok(doc, `no document entry in ${JSON.stringify(entries)}`);
+    assert.match(doc.url, /example\.com/);
+    assert.equal(doc.status, 200);
+    // Time to fetch the document, not the whole page load — which reads 0
+    // until the load event and would have made every document look instant.
+    assert.ok(doc.ms >= 0);
+  });
+
+  // AGENT-39: a subresource is the case fetch/XHR wrapping can never reach —
+  // the page did not call anything, the parser did. A classic script tag loads
+  // cross-origin without CORS, so this works against any origin.
+  it('network reports a subresource the page never fetched itself', async () => {
+    anoa('open', 'example.com');
+    anoa('network', '--clear');
+
+    const src = `http://127.0.0.1:${PORT}/json/version`;
+    anoa('eval', `(function(){var s=document.createElement('script');s.src=${JSON.stringify(src)};document.head.appendChild(s);})()`);
+    await new Promise(r => setTimeout(r, 1500));
+
+    const entries = JSON.parse(anoa('network', '--json').out).entries;
+    const script = entries.find(e => e.kind === 'script' && e.url.includes('/json/version'));
+    assert.ok(script, `no script entry in ${JSON.stringify(entries.map(e => [e.kind, e.url]))}`);
+    // Cross-origin without Timing-Allow-Origin: the browser discloses no
+    // status, and null says that. A printed 0 would read as a failed request.
+    assert.ok(script.status === null || script.status === 200);
+  });
+
+  // AGENT-40: fetch is in both sources — our wrapper and the browser's timing
+  // buffer — so the merge has to drop one. Counting it twice would double
+  // every XHR on the page.
+  it('a fetch is counted once, and carries its method', async () => {
+    anoa('open', 'example.com');
+    anoa('network', '--clear');
+
+    const url = `http://127.0.0.1:${PORT}/json/version`;
+    anoa('eval', `fetch(${JSON.stringify(url)}).catch(function(){})`);
+    anoa('wait', '--network-idle', '--timeout', '8000');
+
+    const entries = JSON.parse(anoa('network', '--json').out).entries;
+    const mine = entries.filter(e => e.url.includes('/json/version'));
+    assert.equal(mine.length, 1, `fetch counted ${mine.length} times`);
+    assert.equal(mine[0].kind, 'fetch');
+    assert.equal(mine[0].method, 'GET');
+  });
+
+  // AGENT-41: --clear has to mean both halves. The timing buffer is the
+  // browser's, and the navigation entry in it outlives any clearing we can ask
+  // for — so a half-honoured --clear came back still holding the document.
+  it('network --clear empties the browser-side entries too', () => {
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+    assert.ok(JSON.parse(anoa('network', '--json').out).count > 0, 'nothing recorded to clear');
+
+    anoa('network', '--clear');
+    assert.equal(JSON.parse(anoa('network', '--json').out).count, 0);
+  });
+
   // AGENT-36: wait --download with nothing downloading returns rather than
   // blocking, for the same reason as AGENT-34.
   it('wait --download returns when nothing is downloading', () => {

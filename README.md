@@ -337,6 +337,21 @@ The binary uses 3 consecutive ports:
 | `N+1` (e.g. 9223) | Chromium's own DevTools endpoint, internal |
 | `N+2` (e.g. 9224) | Internal WebSocket proxy upstream |
 
+### The Browser domain
+
+`Browser.setDownloadBehavior`, `grantPermissions`, `resetPermissions`,
+`getWindowForTarget` and `setWindowBounds` are answered by anoa rather than
+passed to Chromium, which rejects them — the browser they describe is one Qt
+owns. They do the real thing: the download directory changes, `deny` refuses,
+the window resizes and the page sees the new viewport, and a granted permission
+is one `navigator.permissions.query` reports as granted.
+
+Permissions are the partial one. QtWebEngine can express `geolocation`,
+`notifications`, `audioCapture` and `videoCapture`; the rest of CDP's list has
+no equivalent, so a request naming one is **refused outright, naming it**, and
+nothing is granted. Granting the half it understood and reporting failure for
+the rest would leave a permission on that the caller believes is off.
+
 ### Remote CDP access
 
 Chromium 111+ rejects DevTools WebSocket connections whose `Origin` header is not allowlisted. anoa starts Chromium with `--remote-allow-origins=*` so remote CDP clients (tunnels, reverse proxies, browser-based frontends) can connect from arbitrary origins. Access control is enforced by the proxy layer via `--auth-token` instead.
@@ -403,7 +418,7 @@ anoa set offline on
 
 anoa console                          # what the page logged
 anoa errors                           # uncaught exceptions
-anoa network                          # fetch/XHR it made: method, status, ms
+anoa network                          # every request: kind or method, status, ms
 
 anoa wait --text "Welcome"            # richer waits
 anoa wait --url "/dashboard"

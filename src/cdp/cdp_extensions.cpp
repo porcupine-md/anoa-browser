@@ -7,6 +7,29 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTimer>
+#include <QUrl>
+
+// { "id": <n>, "result": <result> } and its error twin. Defined here rather
+// than in the anonymous namespace further down because handleBrowser needs
+// them, and it runs before that namespace is declared.
+static QString cdpResult(const QJsonObject &cmd, const QJsonObject &result)
+{
+    QJsonObject resp;
+    resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
+    resp[QStringLiteral("result")] = result;
+    return QJsonDocument(resp).toJson(QJsonDocument::Compact);
+}
+
+static QString cdpError(const QJsonObject &cmd, const QString &message)
+{
+    QJsonObject error;
+    error[QStringLiteral("code")] = -32000;
+    error[QStringLiteral("message")] = message;
+    QJsonObject resp;
+    resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
+    resp[QStringLiteral("error")] = error;
+    return QJsonDocument(resp).toJson(QJsonDocument::Compact);
+}
 
 static QString stubResult(const QJsonObject &cmd)
 {
@@ -38,7 +61,7 @@ QString CdpExtensions::processCommand(const QJsonObject &cmd, QWebEnginePage *pa
     if (domain == QLatin1String("Security"))
         return handleSecurity(cmd, page);
     if (domain == QLatin1String("Browser"))
-        return handleBrowser(cmd);
+        return handleBrowser(cmd, tabs);
     if (domain == QLatin1String("Target"))
         return handleTarget(cmd, tabs, deferred, sendLater);
     // anoa's own domain. Downloads are browser state, so Runtime.evaluate — how
@@ -110,7 +133,7 @@ QJsonObject CdpExtensions::rewritePassthrough(const QJsonObject &cmd)
     return QJsonObject(); // no rewrite needed
 }
 
-QString CdpExtensions::handleBrowser(const QJsonObject &cmd)
+QString CdpExtensions::handleBrowser(const QJsonObject &cmd, TabHost *tabs)
 {
     // Only stub Browser commands that QtWebEngine Chromium rejects with
     // "Browser context management is not supported". Pass everything else
@@ -129,38 +152,83 @@ QString CdpExtensions::handleBrowser(const QJsonObject &cmd)
         QTimer::singleShot(150, qApp, &QCoreApplication::quit);
         return stubResult(cmd);
     }
-    if (method == QLatin1String("Browser.setDownloadBehavior")
-            || method == QLatin1String("Browser.getWindowForTarget")
-            || method == QLatin1String("Browser.setWindowBounds")
-            || method == QLatin1String("Browser.grantPermissions")
-            || method == QLatin1String("Browser.resetPermissions")) {
-        return stubResult(cmd);
+
+    // The five below were stubs for the same reason Browser.close was: Chromium
+    // rejects them with "Browser context management is not supported", so the
+    // choice looked like an error the caller could not act on or a success. It
+    // was neither — Qt can do four of these, and the fifth can at least say
+    // which permissions it could not grant instead of claiming all of them.
+    const QJsonObject params = cmd.value(QStringLiteral("params")).toObject();
+
+    if (method == QLatin1String("Browser.setDownloadBehavior")) {
+        if (!tabs)
+            return cdpError(cmd, QStringLiteral("no browser"));
+        const QString behavior = params.value(QStringLiteral("behavior")).toString();
+        const QString path = params.value(QStringLiteral("downloadPath")).toString();
+        if (!tabs->setDownloadBehavior(behavior, path))
+            return cdpError(cmd, QStringLiteral("unknown download behavior: ") + behavior);
+        return cdpResult(cmd, QJsonObject());
     }
+
+    if (method == QLatin1String("Browser.grantPermissions")) {
+        if (!tabs)
+            return cdpError(cmd, QStringLiteral("no browser"));
+        QStringList names;
+        const QJsonArray wanted = params.value(QStringLiteral("permissions")).toArray();
+        for (const QJsonValue &v : wanted)
+            names.append(v.toString());
+        QStringList unsupported;
+        tabs->grantPermissions(QUrl(params.value(QStringLiteral("origin")).toString()),
+                               names, &unsupported);
+        // A partial grant reported as a full one is how a script ends up
+        // believing it has camera access it never got.
+        if (!unsupported.isEmpty()) {
+            return cdpError(cmd, QStringLiteral("QtWebEngine cannot grant: ")
+                                     + unsupported.join(QStringLiteral(", ")));
+        }
+        return cdpResult(cmd, QJsonObject());
+    }
+
+    if (method == QLatin1String("Browser.resetPermissions")) {
+        if (!tabs)
+            return cdpError(cmd, QStringLiteral("no browser"));
+        tabs->resetPermissions();
+        return cdpResult(cmd, QJsonObject());
+    }
+
+    if (method == QLatin1String("Browser.getWindowForTarget")) {
+        if (!tabs)
+            return cdpError(cmd, QStringLiteral("no browser"));
+        // The empty {} this used to return was worse than a stub: a client
+        // reading `windowId` off it got undefined and passed that straight back
+        // into setWindowBounds. One window per browser, so the id is a
+        // constant — but a real one.
+        QJsonObject result;
+        result[QStringLiteral("windowId")] = 1;
+        result[QStringLiteral("bounds")] = tabs->windowBounds();
+        return cdpResult(cmd, result);
+    }
+
+    if (method == QLatin1String("Browser.setWindowBounds")) {
+        if (!tabs)
+            return cdpError(cmd, QStringLiteral("no browser"));
+        const QJsonObject bounds = params.value(QStringLiteral("bounds")).toObject();
+        const QJsonObject current = tabs->windowBounds();
+        // CDP sends only what it wants changed, so an absent width means "leave
+        // it", not zero.
+        const int w = bounds.value(QStringLiteral("width"))
+                          .toInt(current.value(QStringLiteral("width")).toInt());
+        const int h = bounds.value(QStringLiteral("height"))
+                          .toInt(current.value(QStringLiteral("height")).toInt());
+        if (!tabs->setWindowBounds(w, h))
+            return cdpError(cmd, QStringLiteral("window bounds must be positive"));
+        return cdpResult(cmd, QJsonObject());
+    }
+
     return QString(); // pass through
 }
 
 namespace {
-
-// { "id": <n>, "result": <result> }
-QString cdpResult(const QJsonObject &cmd, const QJsonObject &result)
-{
-    QJsonObject resp;
-    resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
-    resp[QStringLiteral("result")] = result;
-    return QJsonDocument(resp).toJson(QJsonDocument::Compact);
-}
-
-// { "id": <n>, "error": { "code": -32000, "message": ... } }
-QString cdpError(const QJsonObject &cmd, const QString &message)
-{
-    QJsonObject error;
-    error[QStringLiteral("code")] = -32000;
-    error[QStringLiteral("message")] = message;
-    QJsonObject resp;
-    resp[QStringLiteral("id")] = cmd.value(QStringLiteral("id")).toInt();
-    resp[QStringLiteral("error")] = error;
-    return QJsonDocument(resp).toJson(QJsonDocument::Compact);
-}
 
 QJsonObject targetInfoFor(TabHost *tabs, const QString &tabId)
 {

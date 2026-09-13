@@ -74,6 +74,12 @@ public:
     QString newTabInBrowserContext(const QUrl &url, const QString &contextId) override;
     void whenTargetResolved(const QString &tabId,
                             std::function<void(const QString &targetId)> cb) override;
+    bool setDownloadBehavior(const QString &behavior, const QString &path) override;
+    void grantPermissions(const QUrl &origin, const QStringList &permissions,
+                          QStringList *unsupported) override;
+    void resetPermissions() override;
+    QJsonObject windowBounds() const override;
+    bool setWindowBounds(int width, int height) override;
     int tabCount() const;
     QWebEngineView *viewFor(const QString &id) const;
     QWebEnginePage *pageFor(const QString &id) const;
@@ -200,6 +206,10 @@ private:
     // profile OBJECT, so two tabs sharing a profile report one id and an
     // isolated tab reports its own.
     QSet<QWebEngineProfile *> m_downloadWired;
+    // Browser.setDownloadBehavior "deny". Read at download time rather than
+    // wired in once, because the handler is connected per profile and a client
+    // can change its mind between two downloads.
+    bool m_denyDownloads = false;
     QList<DownloadRecord> m_downloads;
     QHash<QWebEngineProfile *, QString> m_contextIds;
     int m_nextContextId = 0;

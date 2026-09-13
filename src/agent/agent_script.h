@@ -24,7 +24,7 @@ inline QLatin1String agentScript()
   // Version, not mere presence: a page carrying an older helper from a previous
   // build has to be upgraded, or every command added since then fails against a
   // page that looks like it already has what it needs.
-  if (window.__anoa && window.__anoa.v === 2) return "ready";
+  if (window.__anoa && window.__anoa.v === 3) return "ready";
 
   const INTERACTIVE = 'a[href],button,input,select,textarea,summary,' +
     '[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],' +
@@ -141,9 +141,17 @@ inline QLatin1String agentScript()
       source: '', line: 0, t: Date.now(),
     }));
 
-    // fetch and XHR cover essentially all page traffic that an agent cares
-    // about. Document and subresource loads are not here — those need CDP's
-    // Network domain, which a one-shot process cannot have been subscribed to.
+    // fetch and XHR are wrapped because nothing else records a *method* or a
+    // status that survives a cross-origin response. Everything else the page
+    // loads — the document, scripts, stylesheets, images, iframes — is read
+    // out of the Resource Timing buffer in network() instead: the browser has
+    // been recording those all along, so there is nothing to install for them
+    // and nothing that has to have been subscribed before the load happened.
+    //
+    // The buffer holds 250 entries by default and then stops. A page with more
+    // subresources than that would silently lose the tail, which is the one
+    // failure an agent could not tell from a quiet page.
+    try { performance.setResourceTimingBufferSize(1000); } catch (e) { /* not fatal */ }
     const origFetch = window.fetch;
     if (origFetch) {
       window.fetch = function (input, init) {
@@ -154,11 +162,11 @@ inline QLatin1String agentScript()
         const settle = () => { api.inflight--; api.lastNet = Date.now(); };
         return origFetch.apply(this, arguments).then(res => {
           settle();
-          push(api.requests, { url, method, status: res.status, ms: Date.now() - started, t: started });
+          push(api.requests, { url, method, kind: 'fetch', status: res.status, ms: Date.now() - started, t: started });
           return res;
         }, err => {
           settle();
-          push(api.requests, { url, method, status: 0, error: String(err), ms: Date.now() - started, t: started });
+          push(api.requests, { url, method, kind: 'fetch', status: 0, error: String(err), ms: Date.now() - started, t: started });
           throw err;
         });
       };
@@ -178,7 +186,7 @@ inline QLatin1String agentScript()
         this.addEventListener('loadend', () => {
           api.inflight--;
           api.lastNet = Date.now();
-          push(api.requests, { url: req.url, method: req.method, status: this.status,
+          push(api.requests, { url: req.url, method: req.method, kind: 'xhr', status: this.status,
                                ms: Date.now() - started, t: started });
         });
       }
@@ -194,7 +202,7 @@ inline QLatin1String agentScript()
         // string to every compiler and two to the limit.
         R"JS(
   const api = {
-    v: 2,
+    v: 3,
     n: 0,
     logs: [],
     errors: [],
@@ -204,6 +212,9 @@ inline QLatin1String agentScript()
     // nothing is in flight and nothing has finished recently.
     inflight: 0,
     lastNet: 0,
+    // When --clear last ran. Only the timing entries need it; our own arrays
+    // are emptied outright.
+    clearedAt: 0,
 
     // Walks the document once, assigning a ref to every interactive element
     // that does not already carry one. Existing refs are preserved so an agent
@@ -415,7 +426,50 @@ inline QLatin1String agentScript()
       return { entries: api.errors, count: api.errors.length };
     },
     network() {
-      return { entries: api.requests, count: api.requests.length };
+      // Two sources, one list. api.requests is fetch and XHR, recorded by the
+      // wrappers above; everything else comes from Resource Timing, which the
+      // browser fills in whether or not anyone was watching.
+      //
+      // A status of null means "not disclosed", not "failed": a cross-origin
+      // response without Timing-Allow-Origin reports responseStatus 0, and
+      // printing that as a 0 would read as a network error.
+      const out = api.requests.slice();
+      const origin = performance.timeOrigin || 0;
+      const add = (e, kind, ms) => {
+        const t = Math.round(origin + e.startTime);
+        // The timing buffer is the browser's, not ours, so clearHistory()
+        // cannot empty it for entries it does not own — the navigation entry
+        // in particular lives as long as the document. Dropping by time is
+        // what makes --clear mean the same thing for both sources.
+        if (t < api.clearedAt) return;
+        out.push({
+          url: e.name,
+          method: '',
+          kind,
+          status: e.responseStatus || null,
+          bytes: e.transferSize || 0,
+          ms: Math.round(ms),
+          t,
+        });
+      };
+      try {
+        const nav = performance.getEntriesByType('navigation')[0];
+        // duration on a navigation entry is the whole page load, and reads 0
+        // until the load event fires. Every other row is how long that one
+        // request took, so the document is measured the same way.
+        if (nav) add(nav, 'document', (nav.responseEnd || 0) - nav.startTime);
+        for (const e of performance.getEntriesByType('resource')) {
+          // Already above, with a method and a status these entries cannot
+          // give — counting them twice would double every XHR on the page.
+          if (e.initiatorType === 'fetch' || e.initiatorType === 'xmlhttprequest') continue;
+          // duration rather than responseEnd here: a cross-origin response
+          // without Timing-Allow-Origin zeroes every timestamp but still
+          // reports a duration.
+          add(e, e.initiatorType || 'other', e.duration);
+        }
+      } catch (e) { /* never let recording break the page */ }
+      out.sort((a, b) => a.t - b.t);
+      return { entries: out, count: out.length };
     },
     // Quiet for at least `ms`. lastNet starts at 0 so a page that has made no
     // request at all is idle immediately, which is right: there is nothing to
@@ -428,6 +482,10 @@ inline QLatin1String agentScript()
       api.logs.length = 0;
       api.errors.length = 0;
       api.requests.length = 0;
+      // Half a clear is worse than none: --clear then `network` would have
+      // come back full of subresources from before the clear.
+      try { performance.clearResourceTimings(); } catch (e) { /* not fatal */ }
+      api.clearedAt = Date.now();
       return { ok: true };
     },
   };

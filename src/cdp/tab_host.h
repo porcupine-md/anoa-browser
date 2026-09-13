@@ -56,4 +56,27 @@ public:
     // all: the page exists before its target does.
     virtual void whenTargetResolved(const QString &tabId,
                                     std::function<void(const QString &targetId)> cb) = 0;
+
+    // ── what the Browser domain needs ───────────────────────────────────────
+    // These exist because the alternative was worse. Each of the commands
+    // below used to be answered with an empty success and no action, which is
+    // the same lie `anoa close` was telling before #30: a Playwright script
+    // granting geolocation or setting a download directory got `{}` back and
+    // nothing happened.
+
+    // `behavior` is CDP's: "allow", "deny", "default" (and "allowAndName",
+    // treated as allow). An empty path leaves the directory alone.
+    virtual bool setDownloadBehavior(const QString &behavior, const QString &path) = 0;
+
+    // CDP permission names. Anything this engine cannot express is returned in
+    // `unsupported` rather than quietly dropped, so the caller is told which
+    // of the permissions it asked for did not happen.
+    virtual void grantPermissions(const QUrl &origin, const QStringList &permissions,
+                                  QStringList *unsupported) = 0;
+    virtual void resetPermissions() = 0;
+
+    // Logical pixels, and the whole window rather than a tab: Chromium has one
+    // window per browser here, so every target reports the same bounds.
+    virtual QJsonObject windowBounds() const = 0;
+    virtual bool setWindowBounds(int width, int height) = 0;
 };

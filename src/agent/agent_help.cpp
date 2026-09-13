@@ -148,13 +148,18 @@ const Group kGroups[] = {
 
     {"debug", "DEBUG  — what the page did", R"(  anoa console [--level <lvl>]      console output, newest last
   anoa errors                       uncaught exceptions and rejections
-  anoa network                      fetch/XHR the page made: method, status, ms
+  anoa network                      every request: kind or method, status, ms
       --clear                       forget what has been recorded so far
 
   These are recorded *inside the page*, so they cover what happened before the
   command ran — a one-shot process could never have subscribed in time. The
-  buffer starts empty on every page load and holds the last 500 entries. Only
-  fetch and XHR are seen; document and subresource loads are not.)"},
+  buffer starts empty on every page load and holds the last 500 entries.
+
+  network covers the document, scripts, stylesheets, images and iframes as
+  well as fetch and XHR. The first column is the method where one is known and
+  the kind of load where none is — the browser records no verb for a
+  stylesheet. A status of `-` means the response did not disclose one, which a
+  cross-origin resource without Timing-Allow-Origin never does.)"},
 
     {"agents", "AGENTS", R"(  anoa skills list                  what skill documents this binary carries
   anoa skills get core              the core workflow, for an agent to read

@@ -23,6 +23,11 @@
 #include <QWebEngineCookieStore>
 #include <QWebEngineDownloadRequest>
 #include <QWebEnginePage>
+// The permission API arrived in 6.8 and this header does not exist before it.
+// The 6.4 floor build is the whole reason both paths are written out below.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+#include <QWebEnginePermission>
+#endif
 #include <QWebEngineProfile>
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
@@ -289,6 +294,17 @@ void AnoaBrowser::acceptDownloadsOn(QWebEngineProfile *profile)
             [this](QWebEngineDownloadRequest *item) {
                 if (!item)
                     return;
+                // Browser.setDownloadBehavior "deny". Cancelled rather than
+                // ignored: leaving the request unanswered is how Qt cancels it
+                // anyway, but without the record that says it was refused.
+                if (m_denyDownloads) {
+                    DownloadRecord rec;
+                    rec.url = item->url().toString();
+                    rec.state = QStringLiteral("cancelled");
+                    m_downloads.append(rec);
+                    item->cancel();
+                    return;
+                }
                 const QString dir = m_config.downloadDir.isEmpty()
                     ? QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)
                     : m_config.downloadDir;
@@ -781,6 +797,138 @@ void AnoaBrowser::whenTargetResolved(const QString &tabId,
                         QObject::disconnect(*conn);
                         cb(targetId);
                     });
+}
+
+// ── the Browser domain ──────────────────────────────────────────────────────
+
+bool AnoaBrowser::setDownloadBehavior(const QString &behavior, const QString &path)
+{
+    if (behavior == QLatin1String("deny")) {
+        m_denyDownloads = true;
+    } else if (behavior == QLatin1String("allow")
+               || behavior == QLatin1String("allowAndName")
+               || behavior == QLatin1String("default")
+               || behavior.isEmpty()) {
+        m_denyDownloads = false;
+    } else {
+        return false;
+    }
+    // The directory is read at download time from the config, which is also
+    // what --download-dir sets — so a client setting it here and a flag setting
+    // it at startup cannot disagree about where a file went.
+    if (!path.isEmpty())
+        m_config.downloadDir = path;
+    return true;
+}
+
+void AnoaBrowser::grantPermissions(const QUrl &origin, const QStringList &permissions,
+                                   QStringList *unsupported)
+{
+    // Four of CDP's twenty-odd permission names. The rest have no expression in
+    // QtWebEngine at all, and the caller is told which ones those were rather
+    // than left to believe everything was granted — the failure this whole
+    // change exists to stop.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    using PT = QWebEnginePermission::PermissionType;
+    static const QHash<QString, PT> kMap = {
+        {QStringLiteral("geolocation"), PT::Geolocation},
+        {QStringLiteral("notifications"), PT::Notifications},
+        {QStringLiteral("audioCapture"), PT::MediaAudioCapture},
+        {QStringLiteral("videoCapture"), PT::MediaVideoCapture},
+    };
+#else
+    using PT = QWebEnginePage::Feature;
+    static const QHash<QString, PT> kMap = {
+        {QStringLiteral("geolocation"), QWebEnginePage::Geolocation},
+        {QStringLiteral("notifications"), QWebEnginePage::Notifications},
+        {QStringLiteral("audioCapture"), QWebEnginePage::MediaAudioCapture},
+        {QStringLiteral("videoCapture"), QWebEnginePage::MediaVideoCapture},
+    };
+#endif
+
+    // CDP allows the origin to be left out, meaning browser-wide. Qt has no
+    // such thing — a permission belongs to an origin — so the active page's
+    // origin stands in, which is the one a script granting permissions is
+    // almost always about to use.
+    QUrl target = origin;
+    if (target.isEmpty()) {
+        QWebEngineView *view = activeView();
+        if (view)
+            target = view->url();
+    }
+
+    // Two passes on purpose. Granting what we understand and then reporting an
+    // error for the rest leaves a half-grant nobody asked for: the caller reads
+    // a failure, believes nothing happened, and geolocation is on. So nothing
+    // is applied unless every name asked for can be.
+    for (const QString &name : permissions) {
+        if (!kMap.contains(name) || target.isEmpty()) {
+            if (unsupported)
+                unsupported->append(name);
+        }
+    }
+    if (unsupported && !unsupported->isEmpty())
+        return;
+
+    for (const QString &name : permissions) {
+        const auto it = kMap.constFind(name);
+        if (it == kMap.constEnd())
+            continue;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+        for (const Tab &tab : m_tabs) {
+            if (tab.profile)
+                tab.profile->queryPermission(target, it.value()).grant();
+        }
+#else
+        for (const Tab &tab : m_tabs) {
+            if (tab.view && tab.view->page()) {
+                tab.view->page()->setFeaturePermission(
+                    target, it.value(), QWebEnginePage::PermissionGrantedByUser);
+            }
+        }
+#endif
+    }
+}
+
+void AnoaBrowser::resetPermissions()
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    QSet<QWebEngineProfile *> done;
+    for (const Tab &tab : m_tabs) {
+        if (!tab.profile || done.contains(tab.profile))
+            continue;
+        done.insert(tab.profile);
+        const QList<QWebEnginePermission> all = tab.profile->listAllPermissions();
+        for (const QWebEnginePermission &p : all)
+            p.reset();
+    }
+#else
+    // Qt before 6.8 has no way to enumerate what was granted, so there is
+    // nothing to walk back. Saying so is the point; pretending is not.
+#endif
+}
+
+QJsonObject AnoaBrowser::windowBounds() const
+{
+    const QWidget *top = window();
+    QJsonObject b;
+    b[QStringLiteral("left")] = top->x();
+    b[QStringLiteral("top")] = top->y();
+    b[QStringLiteral("width")] = top->width();
+    b[QStringLiteral("height")] = top->height();
+    b[QStringLiteral("windowState")] = QStringLiteral("normal");
+    return b;
+}
+
+bool AnoaBrowser::setWindowBounds(int width, int height)
+{
+    if (width <= 0 || height <= 0)
+        return false;
+    // window() is this widget in headless mode and the BrowserWindow around it
+    // when there is one, so a single call covers both and the views follow
+    // through resizeEvent.
+    window()->resize(width, height);
+    return true;
 }
 
 QString AnoaBrowser::tabIdForTargetId(const QString &targetId) const

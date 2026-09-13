@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startBrowser, stopBrowser, openDevtoolsWs, sendCdp, listTabs } from './helpers.js';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startBrowser, stopBrowser, openDevtoolsWs, sendCdp, listTabs, BASE_URL } from './helpers.js';
 
 describe('CDP Extension Stubs', () => {
   let proc;
@@ -61,12 +64,29 @@ describe('CDP Extension Stubs', () => {
   it('Security.setIgnoreCertificateErrors returns stub {}', () =>
     expectStub('Security.setIgnoreCertificateErrors', { ignore: true }));
 
-  // EXT-14
-  it('Browser.setDownloadBehavior returns stub {}', () =>
-    expectStub('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: '/tmp' }));
-  // EXT-15
-  it('Browser.getWindowForTarget returns stub {}', () =>
-    expectStub('Browser.getWindowForTarget', { targetId: 'x' }));
+  // EXT-14: these used to be stubs — an empty success that changed nothing,
+  // the same lie Browser.close was telling before #30. A wrong behavior name
+  // is now an error rather than a cheerful {}.
+  it('Browser.setDownloadBehavior is accepted, and a bad behavior is refused', async () => {
+    const ok = await sendCdp(ws, 'Browser.setDownloadBehavior',
+                             { behavior: 'allow', downloadPath: '/tmp' }, nextId());
+    expect(ok.result).toBeDefined();
+    expect(ok.error).toBeUndefined();
+
+    const bad = await sendCdp(ws, 'Browser.setDownloadBehavior',
+                              { behavior: 'nonsense' }, nextId());
+    expect(bad.error?.message).toMatch(/behavior/i);
+  });
+
+  // EXT-15: it answered {} — no windowId at all — so a client doing
+  // `const {windowId} = await getWindowForTarget()` passed undefined straight
+  // back into setWindowBounds.
+  it('Browser.getWindowForTarget returns a real windowId and bounds', async () => {
+    const r = await sendCdp(ws, 'Browser.getWindowForTarget', {}, nextId());
+    expect(r.result.windowId).toBe(1);
+    expect(r.result.bounds.width).toBeGreaterThan(0);
+    expect(r.result.bounds.height).toBeGreaterThan(0);
+  });
 
   // EXT-16
   it('Target.createBrowserContext returns synthetic context ID', async () => {
@@ -90,6 +110,150 @@ describe('CDP Extension Stubs', () => {
       expect(responses[i].id).toBe(ids[i]);
     }
   });
+
+  // ── the rest of the Browser domain, which used to be four more stubs ──────
+
+  // EXT-20: it answered {} and left the window exactly as it was. Asserted
+  // through two independent readings — the browser's own bounds and the
+  // renderer's innerWidth — because the first alone would pass on a widget
+  // that resized without the page ever hearing about it.
+  it('Browser.setWindowBounds actually resizes, and the page sees it', async () => {
+    const before = (await sendCdp(ws, 'Browser.getWindowForTarget', {}, nextId())).result.bounds;
+    const target = { width: before.width - 200, height: before.height - 100 };
+
+    const set = await sendCdp(ws, 'Browser.setWindowBounds',
+                              { windowId: 1, bounds: target }, nextId());
+    expect(set.error).toBeUndefined();
+
+    // The resize crosses a process boundary on its way to the renderer.
+    let inner = '';
+    for (let i = 0; i < 40 && inner !== `${target.width}x${target.height}`; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const ev = await sendCdp(ws, 'Runtime.evaluate',
+        { expression: `[innerWidth,innerHeight].join('x')`, returnByValue: true }, nextId());
+      inner = ev.result?.result?.value ?? '';
+    }
+    expect(inner).toBe(`${target.width}x${target.height}`);
+
+    const after = (await sendCdp(ws, 'Browser.getWindowForTarget', {}, nextId())).result.bounds;
+    expect(after.width).toBe(target.width);
+    expect(after.height).toBe(target.height);
+
+    // Put it back: every later case in this file shares this browser.
+    await sendCdp(ws, 'Browser.setWindowBounds',
+                  { windowId: 1, bounds: { width: before.width, height: before.height } },
+                  nextId());
+  }, 20000);
+
+  // EXT-21: a bare bounds object with only one side named must leave the other
+  // alone. CDP sends partial bounds, and reading a missing width as 0 would
+  // collapse the window.
+  it('Browser.setWindowBounds leaves an unnamed dimension alone', async () => {
+    const before = (await sendCdp(ws, 'Browser.getWindowForTarget', {}, nextId())).result.bounds;
+    await sendCdp(ws, 'Browser.setWindowBounds',
+                  { windowId: 1, bounds: { width: before.width - 50 } }, nextId());
+    const after = (await sendCdp(ws, 'Browser.getWindowForTarget', {}, nextId())).result.bounds;
+    expect(after.width).toBe(before.width - 50);
+    expect(after.height).toBe(before.height);
+
+    await sendCdp(ws, 'Browser.setWindowBounds',
+                  { windowId: 1, bounds: { width: before.width } }, nextId());
+  });
+
+  // EXT-22: the stub reported every permission granted. A page asking the
+  // Permissions API disagreed, which is the only way anyone would have found
+  // out. Needs a real origin: a permission belongs to one, and about:blank
+  // has none to speak of.
+  it('Browser.grantPermissions really grants one', async () => {
+    await sendCdp(ws, 'Page.navigate', { url: `${BASE_URL}/json/version` }, nextId());
+    for (let i = 0; i < 40; i++) {
+      const ev = await sendCdp(ws, 'Runtime.evaluate',
+        { expression: 'location.origin', returnByValue: true }, nextId());
+      if ((ev.result?.result?.value ?? '').startsWith('http')) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const state = async () => {
+      const ev = await sendCdp(ws, 'Runtime.evaluate', {
+        expression: `navigator.permissions.query({name:'geolocation'}).then(p=>p.state)`,
+        awaitPromise: true, returnByValue: true,
+      }, nextId());
+      return ev.result?.result?.value;
+    };
+
+    // The default profile is persistent, so a grant outlives the process that
+    // made it — this case has to start from a known state rather than assume
+    // the last run left one.
+    await sendCdp(ws, 'Browser.resetPermissions', {}, nextId());
+    expect(await state()).toBe('prompt');
+
+    const granted = await sendCdp(ws, 'Browser.grantPermissions',
+                                  { permissions: ['geolocation'] }, nextId());
+    expect(granted.error).toBeUndefined();
+    expect(await state()).toBe('granted');
+
+    const reset = await sendCdp(ws, 'Browser.resetPermissions', {}, nextId());
+    expect(reset.error).toBeUndefined();
+  }, 20000);
+
+  // EXT-23: the honest half. QtWebEngine has no expression for most of CDP's
+  // permission names, and saying so beats granting four of five and reporting
+  // success — a script would go on believing it had camera access.
+  it('Browser.grantPermissions names the permissions it cannot grant', async () => {
+    const r = await sendCdp(ws, 'Browser.grantPermissions',
+                            { permissions: ['geolocation', 'midiSysex'] }, nextId());
+    expect(r.error).toBeDefined();
+    expect(r.error.message).toMatch(/midiSysex/);
+    expect(r.error.message).not.toMatch(/geolocation/);
+
+    // And the half it *could* do must not have happened either. Granting some
+    // of a list and then reporting failure leaves a permission on that the
+    // caller has every reason to believe is off.
+    const ev = await sendCdp(ws, 'Runtime.evaluate', {
+      expression: `navigator.permissions.query({name:'geolocation'}).then(p=>p.state)`,
+      awaitPromise: true, returnByValue: true,
+    }, nextId());
+    expect(ev.result?.result?.value).toBe('prompt');
+  });
+
+  // EXT-24: the one claim the others do not reach — that "deny" refuses. A
+  // stub answered yes to this and downloaded the file anyway, which is the
+  // worst shape of the bug: a script that thought it had turned downloads off.
+  //
+  // A blob rather than a URL, so the case needs no server and no network.
+  it('Browser.setDownloadBehavior deny actually refuses a download', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'anoa-dl-'));
+    const trigger = (name) => `(function(){` +
+      `var b=new Blob(["x"],{type:"text/plain"});` +
+      `var a=document.createElement("a");a.href=URL.createObjectURL(b);` +
+      `a.download=${JSON.stringify(name)};document.body.appendChild(a);a.click();})()`;
+    const downloads = async () =>
+      (await sendCdp(ws, 'Anoa.getDownloads', {}, nextId())).result.downloads;
+
+    const before = (await downloads()).length;
+
+    await sendCdp(ws, 'Browser.setDownloadBehavior',
+                  { behavior: 'deny' }, nextId());
+    await sendCdp(ws, 'Runtime.evaluate', { expression: trigger('denied.txt') }, nextId());
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const denied = (await downloads()).slice(before);
+    expect(denied.length).toBe(1);
+    expect(denied[0].state).toBe('cancelled');
+    expect(existsSync(join(dir, 'denied.txt'))).toBe(false);
+
+    // And allow again, into a directory this test names, so the path half of
+    // the command is checked too rather than assumed.
+    await sendCdp(ws, 'Browser.setDownloadBehavior',
+                  { behavior: 'allow', downloadPath: dir }, nextId());
+    await sendCdp(ws, 'Runtime.evaluate', { expression: trigger('allowed.txt') }, nextId());
+
+    for (let i = 0; i < 40 && !existsSync(join(dir, 'allowed.txt')); i++)
+      await new Promise((r) => setTimeout(r, 100));
+    expect(existsSync(join(dir, 'allowed.txt'))).toBe(true);
+
+    rmSync(dir, { recursive: true, force: true });
+  }, 20000);
 
   // EXT-19
   it('Unknown domain (DOM.getDocument) is forwarded to Chromium and returns result or error', async () => {

@@ -1272,9 +1272,22 @@ int cmdRecorded(Session &s, const QString &verb, QStringList args, bool json)
     for (const QJsonValue &en : entries) {
         const QJsonObject x = en.toObject();
         if (verb == QStringLiteral("network")) {
+            // The first column is the method where one is known and the kind of
+            // load where one is not: only fetch and XHR are recorded by us and
+            // carry a verb, while a stylesheet or an image comes out of the
+            // browser's timing buffer, which records no method at all. Printing
+            // a made-up GET for those would be the tidier-looking lie.
+            const QString method = x.value(QStringLiteral("method")).toString();
+            const QString kind = x.value(QStringLiteral("kind")).toString();
+            const QJsonValue status = x.value(QStringLiteral("status"));
             out() << QStringLiteral("  %1  %2  %3ms  %4")
-                         .arg(x.value(QStringLiteral("method")).toString(), -6)
-                         .arg(x.value(QStringLiteral("status")).toInt())
+                         .arg(method.isEmpty() ? kind : method, -9)
+                         // null is "the response did not disclose it", which a
+                         // printed 0 would read as a failed request.
+                         .arg(status.isNull() || status.isUndefined()
+                                  ? QStringLiteral("-")
+                                  : QString::number(status.toInt()),
+                              3)
                          .arg(x.value(QStringLiteral("ms")).toInt())
                          .arg(x.value(QStringLiteral("url")).toString())
                   << Qt::endl;

@@ -383,7 +383,7 @@ more. Use `snapshot` when you need to *act*, `get text` when you need to *read*.
 |---|---|
 | `anoa console [--level <lvl>]` | console output, newest last |
 | `anoa errors` | uncaught exceptions and rejections |
-| `anoa network` | fetch/XHR the page made: method, status, ms |
+| `anoa network` | every request the page made — document, subresources, fetch and XHR: kind or method, status, ms |
 
 All three take `--clear` to forget what has been recorded.
 
@@ -420,6 +420,11 @@ Worth knowing so you do not reach for them: there is no React introspection, no
 Web Vitals, no accessibility audit, no credential vault, no MCP server, no
 plugin system, and no request interception — `anoa network` observes, it cannot
 block or rewrite.
+
+Over CDP, most of `Browser.grantPermissions` is out of reach too: QtWebEngine
+has `geolocation`, `notifications`, `audioCapture` and `videoCapture` and no
+equivalent for the rest of CDP's list. Asking for one of the others is refused
+and names it, rather than granting the part it understood.
 )";
 
 const char kIndex[] = R"(core       the workflow: start a browser, snapshot, act by ref

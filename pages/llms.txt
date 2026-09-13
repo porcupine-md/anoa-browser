@@ -68,7 +68,7 @@ rather than by a person.
 - Downloads: `downloads` — state, path and bytes for everything the browser downloaded
 - Tabs: `tab new [url] [--name] [--profile] [--isolated]`, `tab list`, `tab select`, `tab close`
 - State: `cookies`, `storage local|session`, `set viewport|device|geo|offline|headers|media`
-- Debug: `console`, `errors`, `network` — recorded inside the page, so they cover what happened before the command ran
+- Debug: `console`, `errors`, `network` — recorded inside the page, so they cover what happened before the command ran. `network` covers the document, scripts, stylesheets, images and iframes as well as fetch and XHR; the first column is the method where one is known and the kind of load where none is, and a `-` status means the response did not disclose one
 - Agents: `skills list`, `skills get core|commands`, `close`
 
 ## Options

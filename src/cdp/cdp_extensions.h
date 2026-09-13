@@ -39,7 +39,7 @@ private:
     static QString handleProfiler(const QJsonObject &cmd);
     static QString handleHeapProfiler(const QJsonObject &cmd);
     static QString handleSecurity(const QJsonObject &cmd, QWebEnginePage *page);
-    static QString handleBrowser(const QJsonObject &cmd);
+    static QString handleBrowser(const QJsonObject &cmd, TabHost *tabs);
     static QString handleTarget(const QJsonObject &cmd, TabHost *tabs, bool *deferred,
                                 const std::function<void(const QString &)> &sendLater);
 };
