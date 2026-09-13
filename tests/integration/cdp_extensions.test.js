@@ -160,62 +160,6 @@ describe('CDP Extension Stubs', () => {
                   { windowId: 1, bounds: { width: before.width } }, nextId());
   });
 
-  // EXT-22: the stub reported every permission granted. A page asking the
-  // Permissions API disagreed, which is the only way anyone would have found
-  // out. Needs a real origin: a permission belongs to one, and about:blank
-  // has none to speak of.
-  it('Browser.grantPermissions really grants one', async () => {
-    await sendCdp(ws, 'Page.navigate', { url: `${BASE_URL}/json/version` }, nextId());
-    for (let i = 0; i < 40; i++) {
-      const ev = await sendCdp(ws, 'Runtime.evaluate',
-        { expression: 'location.origin', returnByValue: true }, nextId());
-      if ((ev.result?.result?.value ?? '').startsWith('http')) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-
-    const state = async () => {
-      const ev = await sendCdp(ws, 'Runtime.evaluate', {
-        expression: `navigator.permissions.query({name:'geolocation'}).then(p=>p.state)`,
-        awaitPromise: true, returnByValue: true,
-      }, nextId());
-      return ev.result?.result?.value;
-    };
-
-    // The default profile is persistent, so a grant outlives the process that
-    // made it — this case has to start from a known state rather than assume
-    // the last run left one.
-    await sendCdp(ws, 'Browser.resetPermissions', {}, nextId());
-    expect(await state()).toBe('prompt');
-
-    const granted = await sendCdp(ws, 'Browser.grantPermissions',
-                                  { permissions: ['geolocation'] }, nextId());
-    expect(granted.error).toBeUndefined();
-    expect(await state()).toBe('granted');
-
-    const reset = await sendCdp(ws, 'Browser.resetPermissions', {}, nextId());
-    expect(reset.error).toBeUndefined();
-  }, 20000);
-
-  // EXT-23: the honest half. QtWebEngine has no expression for most of CDP's
-  // permission names, and saying so beats granting four of five and reporting
-  // success — a script would go on believing it had camera access.
-  it('Browser.grantPermissions names the permissions it cannot grant', async () => {
-    const r = await sendCdp(ws, 'Browser.grantPermissions',
-                            { permissions: ['geolocation', 'midiSysex'] }, nextId());
-    expect(r.error).toBeDefined();
-    expect(r.error.message).toMatch(/midiSysex/);
-    expect(r.error.message).not.toMatch(/geolocation/);
-
-    // And the half it *could* do must not have happened either. Granting some
-    // of a list and then reporting failure leaves a permission on that the
-    // caller has every reason to believe is off.
-    const ev = await sendCdp(ws, 'Runtime.evaluate', {
-      expression: `navigator.permissions.query({name:'geolocation'}).then(p=>p.state)`,
-      awaitPromise: true, returnByValue: true,
-    }, nextId());
-    expect(ev.result?.result?.value).toBe('prompt');
-  });
-
   // EXT-24: the one claim the others do not reach — that "deny" refuses. A
   // stub answered yes to this and downloaded the file anyway, which is the
   // worst shape of the bug: a script that thought it had turned downloads off.
@@ -358,4 +302,97 @@ describe('Target domain against the tab registry', () => {
     expect(r.error).toBeTruthy();
     expect(r.error.message).toMatch(/browser context/i);
   }, 20000);
+});
+
+// Their own browser, and an ephemeral one. A granted permission is written to
+// the profile, and below Qt 6.8 nothing can take it back — so on a persistent
+// profile these cases pass once and then start from 'granted' forever. CI
+// builds 6.7.3 and found exactly that; --ephemeral keeps nothing, so every run
+// starts where the last one did not leave anything.
+describe('Browser.grantPermissions (ephemeral profile)', () => {
+  let proc;
+  let ws;
+  let cmdId = 7000;
+  const nextId = () => ++cmdId;
+
+  beforeAll(async () => {
+    proc = await startBrowser(['--ephemeral']);
+    ({ ws } = await openDevtoolsWs());
+  }, 20000);
+
+  afterAll(async () => {
+    ws?.close();
+    await stopBrowser(proc);
+  });
+
+  // EXT-22: the stub reported every permission granted. A page asking the
+  // Permissions API disagreed, which is the only way anyone would have found
+  // out. Needs a real origin: a permission belongs to one, and about:blank
+  // has none to speak of.
+  it('Browser.grantPermissions really grants one', async () => {
+    await sendCdp(ws, 'Page.navigate', { url: `${BASE_URL}/json/version` }, nextId());
+    for (let i = 0; i < 40; i++) {
+      const ev = await sendCdp(ws, 'Runtime.evaluate',
+        { expression: 'location.origin', returnByValue: true }, nextId());
+      if ((ev.result?.result?.value ?? '').startsWith('http')) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const state = async () => {
+      const ev = await sendCdp(ws, 'Runtime.evaluate', {
+        expression: `navigator.permissions.query({name:'geolocation'}).then(p=>p.state)`,
+        awaitPromise: true, returnByValue: true,
+      }, nextId());
+      return ev.result?.result?.value;
+    };
+
+    expect(await state()).toBe('prompt');
+
+    const granted = await sendCdp(ws, 'Browser.grantPermissions',
+                                  { permissions: ['geolocation'] }, nextId());
+    expect(granted.error).toBeUndefined();
+    expect(await state()).toBe('granted');
+
+    // Reset needs Qt 6.8 to enumerate what was granted. Below that it reports
+    // the limitation rather than a success it cannot deliver, and either
+    // answer is correct here — what must never happen is a plain {} with the
+    // permission still on.
+    const reset = await sendCdp(ws, 'Browser.resetPermissions', {}, nextId());
+    if (reset.error) {
+      expect(reset.error.message).toMatch(/cannot.*reset|Qt 6\.8/i);
+    } else {
+      expect(await state()).toBe('prompt');
+    }
+  }, 20000);
+
+  // EXT-23: the honest half. QtWebEngine has no expression for most of CDP's
+  // permission names, and saying so beats granting four of five and reporting
+  // success — a script would go on believing it had camera access.
+  it('Browser.grantPermissions names the permissions it cannot grant', async () => {
+    // notifications rather than geolocation, and "unchanged" rather than
+    // "prompt": EXT-22 grants geolocation just before this and below Qt 6.8
+    // cannot put it back. A case that depends on the one before it having
+    // cleaned up is a case that passes on one machine and not another, which
+    // is exactly what happened.
+    const notifications = async () => {
+      const ev = await sendCdp(ws, 'Runtime.evaluate', {
+        expression: `navigator.permissions.query({name:'notifications'}).then(p=>p.state)`,
+        awaitPromise: true, returnByValue: true,
+      }, nextId());
+      return ev.result?.result?.value;
+    };
+    const before = await notifications();
+
+    const r = await sendCdp(ws, 'Browser.grantPermissions',
+                            { permissions: ['notifications', 'midiSysex'] }, nextId());
+    expect(r.error).toBeDefined();
+    expect(r.error.message).toMatch(/midiSysex/);
+    expect(r.error.message).not.toMatch(/notifications/);
+
+    // And the half it *could* do must not have happened either. Granting some
+    // of a list and then reporting failure leaves a permission on that the
+    // caller has every reason to believe is off.
+    expect(await notifications()).toBe(before);
+  }, 20000);
+
 });

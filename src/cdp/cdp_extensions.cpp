@@ -192,7 +192,11 @@ QString CdpExtensions::handleBrowser(const QJsonObject &cmd, TabHost *tabs)
     if (method == QLatin1String("Browser.resetPermissions")) {
         if (!tabs)
             return cdpError(cmd, QStringLiteral("no browser"));
-        tabs->resetPermissions();
+        if (!tabs->resetPermissions()) {
+            return cdpError(cmd, QStringLiteral(
+                "this QtWebEngine cannot enumerate granted permissions, so they "
+                "cannot be reset — restart the browser instead (needs Qt 6.8)"));
+        }
         return cdpResult(cmd, QJsonObject());
     }
 

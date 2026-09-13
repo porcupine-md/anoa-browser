@@ -77,7 +77,7 @@ public:
     bool setDownloadBehavior(const QString &behavior, const QString &path) override;
     void grantPermissions(const QUrl &origin, const QStringList &permissions,
                           QStringList *unsupported) override;
-    void resetPermissions() override;
+    bool resetPermissions() override;
     QJsonObject windowBounds() const override;
     bool setWindowBounds(int width, int height) override;
     int tabCount() const;

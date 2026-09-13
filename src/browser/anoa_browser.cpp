@@ -890,7 +890,7 @@ void AnoaBrowser::grantPermissions(const QUrl &origin, const QStringList &permis
     }
 }
 
-void AnoaBrowser::resetPermissions()
+bool AnoaBrowser::resetPermissions()
 {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     QSet<QWebEngineProfile *> done;
@@ -902,9 +902,13 @@ void AnoaBrowser::resetPermissions()
         for (const QWebEnginePermission &p : all)
             p.reset();
     }
+    return true;
 #else
-    // Qt before 6.8 has no way to enumerate what was granted, so there is
-    // nothing to walk back. Saying so is the point; pretending is not.
+    // Qt before 6.8 cannot enumerate what was granted, so there is nothing to
+    // walk back — and a success here would be the exact bug this file is busy
+    // fixing. CI found it: the build there is 6.7.3, where every permission
+    // stayed granted while resetPermissions reported that it had cleared them.
+    return false;
 #endif
 }
 

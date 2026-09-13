@@ -352,6 +352,12 @@ no equivalent, so a request naming one is **refused outright, naming it**, and
 nothing is granted. Granting the half it understood and reporting failure for
 the rest would leave a permission on that the caller believes is off.
 
+`resetPermissions` needs Qt 6.8, which is where QtWebEngine first lets a
+profile enumerate what it has granted. Older builds answer with that
+limitation rather than a success they cannot deliver — below 6.8 a granted
+permission is written to the profile and only a fresh or `--ephemeral` profile
+clears it.
+
 ### Remote CDP access
 
 Chromium 111+ rejects DevTools WebSocket connections whose `Origin` header is not allowlisted. anoa starts Chromium with `--remote-allow-origins=*` so remote CDP clients (tunnels, reverse proxies, browser-based frontends) can connect from arbitrary origins. Access control is enforced by the proxy layer via `--auth-token` instead.

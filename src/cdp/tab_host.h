@@ -73,7 +73,10 @@ public:
     // of the permissions it asked for did not happen.
     virtual void grantPermissions(const QUrl &origin, const QStringList &permissions,
                                   QStringList *unsupported) = 0;
-    virtual void resetPermissions() = 0;
+    // False where the engine cannot enumerate what was granted, which is
+    // every Qt before 6.8 — a success there would be a fresh instance of the
+    // lie this interface exists to remove.
+    virtual bool resetPermissions() = 0;
 
     // Logical pixels, and the whole window rather than a tab: Chromium has one
     // window per browser here, so every target reports the same bounds.
