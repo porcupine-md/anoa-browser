@@ -43,7 +43,11 @@ jobs:
           set -euo pipefail
           gh release download "${{ steps.tag.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
             --pattern 'anoa-macos-universal.tar.gz' \
-            --pattern 'anoa-linux-x86_64.tar.gz'
+            --pattern 'anoa-linux-x86_64.tar.gz' \
+            --pattern 'anoa-linux-aarch64.tar.gz'
+          # The aarch64 tarball is hashed below, so it must be downloaded too —
+          # without the pattern above sha256sum fails under set -e and this
+          # workflow has been unable to run since aarch64 shipped (issue #37).
 
       - name: Update tap
         env:
@@ -75,6 +79,10 @@ jobs:
               -e "s/{{LINUX_X86_64_SHA256}}/${LINUX_X86_64_SHA256}/" \
               -e "s/{{LINUX_AARCH64_SHA256}}/${LINUX_AARCH64_SHA256}/" \
               "${GITHUB_WORKSPACE}/.github/homebrew/anoa-linux.rb.tpl" > Formula/anoa-linux.rb
+
+          # Verify the rendered tap before pushing it: one invalid file makes
+          # the whole tap un-tappable for everyone (issue #37).
+          "${GITHUB_WORKSPACE}/scripts/validate_homebrew_templates.sh" .
 
           # Retire the old names properly rather than leaving two of everything.
           #

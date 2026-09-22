@@ -1,4 +1,8 @@
-class AnoaBrowserLinux < Formula
+# The class name must be the CamelCase form of the file base name
+# (anoa-linux -> AnoaLinux): Homebrew derives it from the file name, and one
+# mismatch makes the whole tap un-tappable. scripts/validate_homebrew_templates.sh
+# enforces this before a tap commit is pushed (issue #37).
+class AnoaLinux < Formula
   desc "Headless browser built on Qt6/QWebEngine with CDP support"
   homepage "https://github.com/porcupine-md/anoa-browser"
   version "{{VERSION}}"

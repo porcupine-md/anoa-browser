@@ -368,3 +368,22 @@ jobs:
         run: bash tests/regression/smoke.sh
         env:
           ANOA_BINARY: ./build/anoa
+
+  # ── 6. Homebrew Tap Templates ───────────────────────────────────────────
+  # Renders .github/homebrew/*.tpl with dummy values and applies the two rules
+  # Homebrew enforces on a tap: a formula's class name and a cask's token must
+  # derive from the file base name. One invalid file makes the whole tap
+  # un-tappable, and v0.7.3..v0.16.0 shipped exactly that because nothing
+  # parsed the rendered output (issue #37). Seconds-cheap: no Qt, no binary.
+  # The same script also runs on the rendered checkout inside both tap
+  # workflows, right before git push.
+  tap-templates:
+    name: Homebrew Tap Templates
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate templates
+        run: bash scripts/validate_homebrew_templates.sh
