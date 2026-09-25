@@ -870,6 +870,68 @@ describe('Agent CLI (Suite 8)', () => {
     assert.equal(JSON.parse(anoa('network', '--json').out).count, 0);
   });
 
+  // AGENT-42: issue #39. Emulation is session-scoped in CDP, and every anoa
+  // command is its own process and its own session — so the media override was
+  // applied, the process exited, and it went with it. The command reported
+  // success about something no later command could observe, which defeats the
+  // whole point of a browser that outlives the commands driving it.
+  it('an emulated colour scheme survives the process that set it', () => {
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+
+    const dark = () => anoa('eval', "matchMedia('(prefers-color-scheme: dark)').matches").out;
+    assert.equal(dark(), 'false', 'page should start light');
+
+    const applied = anoa('set', 'media', 'dark');
+    assert.equal(applied.code, 0, applied.err);
+
+    // The assertion the issue makes: a *different* process has to see it.
+    assert.equal(dark(), 'true', 'emulation did not survive the CLI process');
+
+    // And it survives a navigation, because the override belongs to the browser.
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+    assert.equal(dark(), 'true', 'emulation did not survive a navigation');
+
+    anoa('set', 'media', 'light');
+    assert.equal(dark(), 'false', 'setting it back did not take');
+  });
+
+  // AGENT-43: the same bug on a command nobody reported, and a worse one to
+  // get wrong — a suite that believes it is offline is quietly online, so it
+  // exercises the wrong path and passes.
+  it('an offline override survives the process that set it', () => {
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+
+    const online = () => anoa('eval', 'navigator.onLine').out;
+    assert.equal(online(), 'true', 'should start online');
+
+    const off = anoa('set', 'offline', 'on');
+    assert.equal(off.code, 0, off.err);
+    assert.equal(online(), 'false', 'the override did not survive the CLI process');
+
+    const on = anoa('set', 'offline', 'off');
+    assert.equal(on.code, 0, on.err);
+    assert.equal(online(), 'true', 'going back online did not take');
+  });
+
+  // AGENT-44: per tab, not per browser. An override that leaked into every tab
+  // would be its own silent wrongness — a themed screenshot of the wrong page.
+  it('emulation set on one tab leaves the other alone', () => {
+    const made = anoa('tab', 'new', 'example.com', '--name', 'themed');
+    assert.equal(made.code, 0, made.err);
+
+    anoa('--tab', 'themed', 'set', 'media', 'dark');
+
+    const darkIn = (tab) => anoa('--tab', tab, 'eval',
+                                 "matchMedia('(prefers-color-scheme: dark)').matches").out;
+    assert.equal(darkIn('themed'), 'true', 'the tab it was set on lost it');
+    assert.equal(darkIn('t1'), 'false', 'the override leaked into another tab');
+
+    anoa('--tab', 'themed', 'tab', 'close');
+  });
+
   // AGENT-36: wait --download with nothing downloading returns rather than
   // blocking, for the same reason as AGENT-34.
   it('wait --download returns when nothing is downloading', () => {

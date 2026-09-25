@@ -375,6 +375,12 @@ more. Use `snapshot` when you need to *act*, `get text` when you need to *read*.
 | `anoa set headers '<json>'` | extra HTTP headers on every request |
 | `anoa set media dark\|light` | emulate prefers-color-scheme |
 
+Every `set` override belongs to the tab, not to the command that applied it, so
+a screenshot or an eval in a later command sees it. Each tab keeps its own, a
+new tab starts clean, and stopping the browser forgets them all. That is worth
+knowing in both directions: a dark screenshot needs no batch, and a tab left
+offline stays offline until something sets it back.
+
 `cookies set` scopes to the page you are on; pass `--url` to scope it elsewhere.
 
 ## Debug

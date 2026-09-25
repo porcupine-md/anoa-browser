@@ -144,7 +144,12 @@ const Group kGroups[] = {
   anoa set geo <lat> <lng>          override geolocation
   anoa set offline [on|off]         cut the page off from the network
   anoa set headers '<json>'         extra HTTP headers on every request
-  anoa set media dark|light         emulate prefers-color-scheme)"},
+  anoa set media dark|light         emulate prefers-color-scheme
+
+  These belong to the tab, not to the command that set one: an override
+  outlives the process, so a later screenshot, pdf or eval sees it. Each tab
+  keeps its own, a new tab starts clean, and stopping the browser forgets
+  them all.)"},
 
     {"debug", "DEBUG  — what the page did", R"(  anoa console [--level <lvl>]      console output, newest last
   anoa errors                       uncaught exceptions and rejections
