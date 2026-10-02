@@ -419,8 +419,8 @@ anoa storage session clear
 
 anoa set viewport 390 844 3           # emulation
 anoa set device iphone-14             # …or a preset; no name lists them
-anoa set media dark
-anoa set offline on
+anoa set media dark                   # each override belongs to the tab and
+anoa set offline on                   # outlives the command that applied it
 
 anoa console                          # what the page logged
 anoa errors                           # uncaught exceptions

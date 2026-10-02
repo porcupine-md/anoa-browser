@@ -519,6 +519,15 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
 <span class="p">$</span> anoa set offline [on|off]         <span class="o">cut the page off from the network</span>
 <span class="p">$</span> anoa set headers '&lt;json&gt;'         <span class="o">extra HTTP headers on every request</span>
 <span class="p">$</span> anoa set media dark|light         <span class="o">emulate prefers-color-scheme</span></pre>
+        <div class="note" style="margin-top:16px">
+          <p>An override belongs to the <strong>tab</strong>, not to the command that applied
+          it. A later <code>screenshot</code>, <code>pdf</code> or <code>eval</code> — a
+          separate process — sees it, which is what makes a dark-mode screenshot one command
+          rather than a batch.</p>
+          <p>Each tab keeps its own, a new tab starts clean, and stopping the browser forgets
+          them all. It cuts both ways: a tab left offline stays offline until something sets
+          it back.</p>
+        </div>
       </section>
 
       <section id="debug">
