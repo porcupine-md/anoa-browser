@@ -81,7 +81,10 @@ pre.term .o{color:var(--term-dim)}                       /* command output */
 pre.term b{color:#fff;font-weight:600}
 
 /* ── sections ─────────────────────────────────────────────────────────────── */
-section{padding:64px 0;border-top:1px solid var(--rule-soft)}
+/* The nav is sticky and 57px tall, so an anchor jump used to land with the
+   heading underneath it — every link in the docs sidebar arrived at a section
+   whose title was covered. scroll-margin-top is what that offset is for. */
+section{padding:64px 0;border-top:1px solid var(--rule-soft);scroll-margin-top:72px}
 section:first-of-type{border-top:0}
 .eyebrow{
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;

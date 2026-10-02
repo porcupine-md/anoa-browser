@@ -60,6 +60,13 @@
         <li><a href="#agents">Agents</a></li>
         <li><a href="#exit">Output and exit codes</a></li>
       </ul>
+
+      <h4>Over CDP</h4>
+      <ul>
+        <li><a href="#clients">Playwright, Puppeteer</a></li>
+        <li><a href="#ports">Ports</a></li>
+        <li><a href="#browser-domain">The Browser domain</a></li>
+      </ul>
     </aside>
 
     <article>
@@ -579,6 +586,70 @@ environment.systemPackages = [ inputs.anoa.packages.${system}.anoa ];</pre>
           view — are documented in the
           <a href="https://github.com/porcupine-md/anoa-browser#web-render-endpoints">README</a>.</p>
         </div>
+      </section>
+
+      <!-- ── OVER CDP ───────────────────────────────────────────────────── -->
+
+      <section id="clients">
+        <h2>Playwright, Puppeteer, and anything else that speaks CDP</h2>
+        <p>There is no driver to install and no adapter to write. anoa serves the Chrome
+        discovery endpoints and a WebSocket a CDP client connects to exactly as it would to
+        Chrome.</p>
+<pre class="term"><span class="c">// Playwright</span>
+const browser = await chromium.connectOverCDP(<b>'http://localhost:9222'</b>);
+
+<span class="c">// Puppeteer</span>
+const browser = await puppeteer.connect({ browserURL: <b>'http://localhost:9222'</b> });</pre>
+        <p style="margin-top:16px">Both suites run against every release. Named profiles with
+        isolated cookie jars, unpacked Chromium extensions (manifest v2) and
+        <code>Page.printToPDF</code> all work through the same connection.</p>
+        <p>With <code>--auth-token</code> set, pass it as a bearer token or as
+        <code>?token=</code> on the WebSocket URL.</p>
+      </section>
+
+      <section id="ports">
+        <h2>Ports — one number gives three</h2>
+        <table class="ref">
+          <thead><tr><th>Port</th><th>What listens there</th></tr></thead>
+          <tbody>
+            <tr><td><code>9222</code></td><td>Discovery (<code>/json</code>,
+              <code>/json/version</code>, <code>/json/list</code>) and the
+              <code>/render/*</code> endpoints. This is the one you point a client at.</td></tr>
+            <tr><td><code>9223</code></td><td>Chromium's own debugging port, kept internal.
+              It also serves the DevTools frontend.</td></tr>
+            <tr><td><code>9224</code></td><td>The CDP proxy. The WebSocket a client is handed
+              lands here; it multiplexes sessions and checks the bearer token.</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:16px"><code>--port</code> moves all three. Leave
+        <code>N+1</code> and <code>N+2</code> free — if something else holds the debugging
+        port, discovery answers with output a client cannot parse.</p>
+      </section>
+
+      <section id="browser-domain">
+        <h2>The Browser domain</h2>
+        <p>Chromium rejects these outright — the browser they describe is one Qt owns and it
+        has no handle on it — so anoa answers them itself:
+        <code>setDownloadBehavior</code>, <code>grantPermissions</code>,
+        <code>resetPermissions</code>, <code>getWindowForTarget</code>,
+        <code>setWindowBounds</code> and <code>close</code>.</p>
+        <p>They do the real thing. The download directory changes and <code>deny</code>
+        refuses; the window resizes and the page sees the new viewport; a granted permission
+        is one <code>navigator.permissions.query</code> reports as granted.</p>
+        <div class="note">
+          <p><strong>Permissions are partial, and say so.</strong> QtWebEngine can express
+          <code>geolocation</code>, <code>notifications</code>, <code>audioCapture</code> and
+          <code>videoCapture</code>. The rest of CDP's list has no equivalent, so a request
+          naming one of the others is <strong>refused, naming it</strong>, and nothing is
+          granted — granting the half it understood and reporting failure for the rest would
+          leave a permission on that the caller believes is off.</p>
+          <p><code>resetPermissions</code> needs Qt 6.8, where a profile first gained the
+          ability to enumerate what it has granted. Older builds report that limitation
+          rather than a success they cannot deliver.</p>
+        </div>
+        <p style="margin-top:20px">Emulation set over CDP behaves the way it does from the
+        CLI: an override belongs to the tab and outlives the connection that applied it, so a
+        client that reconnects finds the page as it left it.</p>
       </section>
 
     </article>
