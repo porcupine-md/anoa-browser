@@ -358,6 +358,38 @@ limitation rather than a success they cannot deliver — below 6.8 a granted
 permission is written to the profile and only a fresh or `--ephemeral` profile
 clears it.
 
+### MCP
+
+`POST /mcp` speaks the Model Context Protocol over Streamable HTTP, so a client
+that cannot run a shell — Claude Desktop among them — can drive this browser
+with typed tools instead of a remembered command line. One JSON-RPC message in,
+one JSON response out; the server pushes nothing, so `GET /mcp` answers 405
+rather than holding a stream open forever.
+
+```json
+{
+  "mcpServers": {
+    "anoa": { "url": "http://localhost:9222/mcp" }
+  }
+}
+```
+
+Every verb is a tool, named `browser_*`. A tool that fails comes back as a
+*result* with `isError` and the command's own message, not as a JSON-RPC error:
+the protocol reserves those for calls it could not parse, and a model needs to
+read a failure to act on it.
+
+It runs commands against this browser the same way the CLI does, so a tab,
+a ref from `browser_snapshot` and an override from `browser_set` are the same
+objects either surface sees. One call at a time — each occupies the connection,
+and a second is refused rather than queued.
+
+Two guards. `--auth-token` covers it like every other endpoint, as a bearer
+token or `?token=`. And an `Origin` header that is not in `--embed-origin` is
+refused with 403: a page in someone's browser can reach localhost through DNS
+rebinding, and a request carrying no `Origin` at all — a real client, or curl —
+is the one that is allowed.
+
 ### Remote CDP access
 
 Chromium 111+ rejects DevTools WebSocket connections whose `Origin` header is not allowlisted. anoa starts Chromium with `--remote-allow-origins=*` so remote CDP clients (tunnels, reverse proxies, browser-based frontends) can connect from arbitrary origins. Access control is enforced by the proxy layer via `--auth-token` instead.
@@ -453,8 +485,8 @@ filled with `anoa upload <target> <file>` — clicking one only asks for a dialo
 nobody can answer.
 
 Not implemented, so you know not to reach for them: React introspection, Web
-Vitals, accessibility audits, a credential vault, an MCP server, plugins, and
-request interception — `anoa network` observes, it cannot block or rewrite.
+Vitals, accessibility audits, a credential vault, plugins, and request
+interception — `anoa network` observes, it cannot block or rewrite.
 
 ---
 

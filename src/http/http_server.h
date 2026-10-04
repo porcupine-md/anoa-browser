@@ -1,11 +1,14 @@
 #pragma once
 
+#include <memory>
+
 #include <QObject>
 #include <QString>
 #include <QStringList>
 #include <QTcpServer>
 
 class AnoaBrowser;
+class McpServer;
 class QUrlQuery;
 class QWebEngineView;
 
@@ -15,6 +18,9 @@ public:
     explicit HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
                        const QString &authToken, AnoaBrowser *browser,
                        QObject *parent = nullptr);
+    // Out of line because m_mcp holds an incomplete type: the McpServer
+    // definition is not visible here and must not have to be.
+    ~HttpServer() override;
 
     bool start();
     void stop();
@@ -52,4 +58,8 @@ private:
     QString m_authToken;
     AnoaBrowser *m_browser;
     QStringList m_embedOrigins;
+    // Built on the first /mcp request, never before: it attaches back to this
+    // same browser, and at construction time the CDP proxy it would dial is
+    // not listening yet.
+    std::unique_ptr<McpServer> m_mcp;
 };
