@@ -10,6 +10,7 @@
 
 #include "browser/anoa_browser.h"
 #include "browser/tab_ids.h"
+#include "mcp/mcp_server.h"
 
 #include <QBuffer>
 #include <QEventLoop>
@@ -41,6 +42,10 @@ HttpServer::HttpServer(quint16 port, quint16 debuggingPort, quint16 proxyPort,
 {
     connect(m_server, &QTcpServer::newConnection, this, &HttpServer::handleNewConnection);
 }
+
+// Here rather than in the header so McpServer can stay an incomplete type
+// there — unique_ptr needs the definition only where it destroys.
+HttpServer::~HttpServer() = default;
 
 bool HttpServer::start()
 {
@@ -345,6 +350,62 @@ void HttpServer::handleNewConnection()
             sendResponse(socket, 401, "Unauthorized", R"({"error":"unauthorized"})");
             return;
         }
+    }
+
+    // ── MCP ─────────────────────────────────────────────────────────────────
+    // Placed after the auth check so --auth-token covers it the same way it
+    // covers everything else, and before the /render resolution below, which
+    // has nothing to do with it.
+    if (path == QLatin1String("/mcp")) {
+        // The spec asks an HTTP transport to validate Origin, because a page
+        // in someone's browser can POST to localhost otherwise and drive this
+        // browser through DNS rebinding. A request with no Origin is not a
+        // page — curl, or an MCP client — and is allowed.
+        const QString origin = headers.value(QStringLiteral("origin"));
+        if (!origin.isEmpty() && !m_embedOrigins.contains(origin)) {
+            sendResponse(socket, 403, "Forbidden",
+                         R"({"error":"origin not allowed — pass --embed-origin"})");
+            return;
+        }
+
+        if (method != QLatin1String("POST")) {
+            // GET is how a client opens the server-initiated SSE stream. This
+            // server never pushes, so declining is the honest answer; the spec
+            // names 405 for exactly this.
+            sendResponse(socket, 405, "Method Not Allowed",
+                         R"({"error":"POST a JSON-RPC message; this server opens no stream"})");
+            return;
+        }
+
+        // A JSON-RPC body can arrive split across packets, and a truncated one
+        // would be reported as a parse error the client could do nothing with.
+        // Same wait the navigate endpoint does.
+        QByteArray bodyBytes = requestData.mid(headerEnd + 4);
+        bool lengthOk = false;
+        const int contentLength =
+            headers.value(QStringLiteral("content-length")).toInt(&lengthOk);
+        if (lengthOk && contentLength > bodyBytes.size()) {
+            while (bodyBytes.size() < contentLength) {
+                if (!socket->waitForReadyRead(5000))
+                    break;
+                bodyBytes += socket->readAll();
+            }
+        }
+
+        if (!m_mcp) {
+            m_mcp = std::make_unique<McpServer>(QStringLiteral("127.0.0.1"), m_port,
+                                                m_authToken);
+        }
+        int status = 200;
+        const QByteArray reply = m_mcp->handle(bodyBytes, &status);
+        if (reply.isEmpty()) {
+            sendResponse(socket, status, status == 202 ? "Accepted" : "No Content",
+                         QByteArray(), "application/json");
+        } else {
+            sendResponse(socket, status, status == 200 ? "OK" : "Bad Request", reply,
+                         "application/json");
+        }
+        return;
     }
 
     // Which tab this request means, resolved once. A caller that names a tab

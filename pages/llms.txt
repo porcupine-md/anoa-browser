@@ -121,6 +121,18 @@ they differ by the device pixel ratio — ask `/render/viewport` rather than
 measuring the image. And `dy` on `/render/scroll` is in angle-delta units where
 negative scrolls down, roughly 60 px of page per 120-unit notch.
 
+## MCP
+
+`POST /mcp` speaks the Model Context Protocol over Streamable HTTP, for a
+client that cannot run a shell. Every verb is a tool named `browser_*`, with a
+JSON Schema per tool. One JSON-RPC message in, one JSON response out; the
+server pushes nothing, so `GET /mcp` answers 405. A tool that fails returns a
+result carrying `isError` and the command's own message rather than a JSON-RPC
+error, which is reserved for a call that could not be parsed. One call at a
+time: each occupies the connection and a second is refused, not queued.
+`--auth-token` covers it, and an `Origin` outside `--embed-origin` is refused
+with 403 (a request with no Origin is a client, not a page, and is allowed).
+
 ## Security
 
 `--auth-token` is off by default and the `/render/*` endpoints carry no origin

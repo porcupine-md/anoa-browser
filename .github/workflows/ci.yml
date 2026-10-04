@@ -65,11 +65,16 @@ jobs:
       # parser, cell map and image-protocol renderers).
       - name: Build test targets
         run: |
+          # Named one by one rather than `all`, so the unit job never builds
+          # WebEngine. The cost is that a new test target is invisible here
+          # until it is added: ctest still registers it, finds no binary, and
+          # reports "Not Run" — which is what happened when mcp-tools landed.
           cmake --build build --parallel \
             --target anoa-test-config \
                      anoa-test-frame-bytes \
                      anoa-test-terminal-ui \
-                     anoa-test-tab-ids
+                     anoa-test-tab-ids \
+                     anoa-test-mcp-tools
 
       - name: Run unit tests (CTest)
         run: ctest --test-dir build -V --output-on-failure

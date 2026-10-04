@@ -15,6 +15,17 @@
 
 #include <QLatin1String>
 
+// The helper's version, as the script itself reports it in `__anoa.v`.
+//
+// A caller that wants to know whether the current document already carries the
+// helper has to compare against this rather than merely checking that the
+// object exists, or a page left over from an older build would look current.
+// KEEP IN STEP with the two places inside the script below: the early return
+// in the install guard, and `v:` in the api object. The literal cannot
+// interpolate this constant without splitting the raw string, and that string
+// is already split once for MSVC's 16380-byte limit.
+constexpr int kAgentScriptVersion = 3;
+
 // Installed idempotently: re-evaluating it must not renumber live refs, or a
 // second snapshot would silently invalidate the refs an agent is holding.
 inline QLatin1String agentScript()

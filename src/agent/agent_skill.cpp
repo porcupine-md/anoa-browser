@@ -420,12 +420,22 @@ subscribed to the events in time. Consequences worth knowing:
 | `anoa skills get commands` | this document |
 | `anoa close` | stop the browser; exit 0 means the process is gone and the port is free |
 
+## Over MCP
+
+`POST /mcp` on the same port speaks the Model Context Protocol, for a client
+that drives tools rather than a shell. Every verb is a tool named `browser_*`,
+schema and all. It is the same browser these commands drive — a tab opened
+here is visible there, and a ref from `snapshot` resolves either way.
+
+Worth knowing if you are on that side of it: a failed tool returns a result
+with `isError` and the command's message, not a protocol error, and only one
+call runs at a time.
+
 ## Not implemented
 
 Worth knowing so you do not reach for them: there is no React introspection, no
-Web Vitals, no accessibility audit, no credential vault, no MCP server, no
-plugin system, and no request interception — `anoa network` observes, it cannot
-block or rewrite.
+Web Vitals, no accessibility audit, no credential vault, no plugin system, and
+no request interception — `anoa network` observes, it cannot block or rewrite.
 
 Over CDP, most of `Browser.grantPermissions` is out of reach too: QtWebEngine
 has `geolocation`, `notifications`, `audioCapture` and `videoCapture` and no

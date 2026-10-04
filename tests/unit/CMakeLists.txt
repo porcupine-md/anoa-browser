@@ -102,6 +102,32 @@ anoa_test_target_coverage(anoa-test-tab-ids)
 
 add_test(NAME TabIdsTests COMMAND anoa-test-tab-ids)
 
+# ── mcp tools ──────────────────────────────────────────────────────────────
+# The tool table is data and one pure mapping function, against Qt6::Core
+# alone — no WebEngine, no event loop — so the unit job can reach the part of
+# MCP where thirty hand-written schemas can quietly disagree with themselves.
+add_library(anoa-mcp-tools-lib STATIC
+    ${CMAKE_SOURCE_DIR}/src/mcp/mcp_tools.cpp
+)
+target_include_directories(anoa-mcp-tools-lib PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(anoa-mcp-tools-lib PUBLIC Qt6::Core)
+anoa_test_target_flags(anoa-mcp-tools-lib)
+anoa_test_target_coverage(anoa-mcp-tools-lib)
+
+add_executable(anoa-test-mcp-tools test_mcp_tools.cpp)
+target_link_libraries(anoa-test-mcp-tools PRIVATE
+    Qt6::Test
+    Qt6::Core
+    anoa-mcp-tools-lib
+)
+set_target_properties(anoa-test-mcp-tools PROPERTIES AUTOMOC ON)
+anoa_test_target_flags(anoa-test-mcp-tools)
+anoa_test_target_coverage(anoa-test-mcp-tools)
+
+add_test(NAME McpToolsTests COMMAND anoa-test-mcp-tools)
+
 # ── terminal ───────────────────────────────────────────────────────────────
 # Both libraries below are separate targets on purpose: anoa-config-lib is
 # config.cpp alone against Qt6::Core, and terminal sources must never join it
