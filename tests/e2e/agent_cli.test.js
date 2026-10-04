@@ -28,9 +28,10 @@ const PORT = Number(process.env.ANOA_E2E_PORT ?? 9455);
 
 let browser;
 
-/** Run the CLI. Never throws on a non-zero exit — the exit code is the result. */
-function run(args) {
-  const r = spawnSync(BIN, args, { encoding: 'utf8' });
+/** Run the CLI. Never throws on a non-zero exit — the exit code is the result.
+ *  `input` feeds stdin, which is how `exec -` reads a batch. */
+function run(args, input) {
+  const r = spawnSync(BIN, args, { encoding: 'utf8', input });
   return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }
 
@@ -95,14 +96,36 @@ describe('Agent CLI (Suite 8)', () => {
   });
 
   // AGENT-05
+  //
+  // These used to assert example.com's exact copy — the phrase "Example
+  // Domain" in the body text, and exactly two <p>. The page was redesigned:
+  // the phrase now lives only in <title>, there is no <h1> at all, and there
+  // are six paragraphs. The suite went red for everyone without anything in
+  // this repository changing.
+  //
+  // So the assertions moved to what the *commands* promise, which is the
+  // subject anyway: get text returns the page's text, eval returns a value
+  // from the page. The one page fact still relied on is the title, which is
+  // what identifies example.com at all.
   it('get text reads the page, eval runs in it', () => {
+    // Opens its own page rather than inheriting whatever the previous case
+    // left behind: a test that only passes in position is one that fails
+    // confusingly the first time anybody runs it alone.
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+
     const text = anoa('get', 'text');
     assert.equal(text.code, 0, text.err);
-    assert.match(text.out, /Example Domain/);
+    assert.ok(text.out.length > 20, `got no page text: ${JSON.stringify(text.out)}`);
+
+    const title = anoa('eval', 'document.title');
+    assert.equal(title.code, 0, title.err);
+    assert.match(title.out, /Example Domain/);
 
     const ev = anoa('eval', 'document.querySelectorAll("p").length');
     assert.equal(ev.code, 0, ev.err);
-    assert.equal(ev.out, '2');
+    assert.match(ev.out, /^\d+$/);
+    assert.ok(Number(ev.out) > 0, 'eval returned a count of zero paragraphs');
   });
 
   // AGENT-06: a click that would land on an overlay must be refused, with the
@@ -283,7 +306,12 @@ describe('Agent CLI (Suite 8)', () => {
   // throwing expression for a failure.
   it('wait handles text, url, fn and hidden', () => {
     anoa('open', 'example.com');
-    assert.equal(anoa('wait', '--text', 'Example Domain', '--timeout', '5000').code, 0);
+    // The marker is put there by this test rather than borrowed from the
+    // page's copy: example.com's wording has already changed once underneath
+    // this suite, and `wait --text` is the subject here, not example.com.
+    anoa('eval', 'document.body.insertAdjacentHTML("beforeend",'
+               + '"<p id=anoa-marker>anoa-wait-marker</p>"); "armed"');
+    assert.equal(anoa('wait', '--text', 'anoa-wait-marker', '--timeout', '5000').code, 0);
     assert.equal(anoa('wait', '--url', 'example.com', '--timeout', '5000').code, 0);
     // Throws until it does not — `window.__late` is undefined at first.
     anoa('eval', 'setTimeout(function(){ window.__late = { ready: true }; }, 300); "armed"');
@@ -680,9 +708,11 @@ describe('Agent CLI (Suite 8)', () => {
   // twenty-step flow spends seconds before any page does anything.
   it('exec runs a batch against one session, and far faster than one process each',
      () => {
+    // `p` rather than `h1`: example.com dropped its heading, and a batch
+    // whose second line cannot resolve stops there and tests nothing.
     const script = 'open example.com\n'
                  + '# comments and blank lines are allowed\n\n'
-                 + 'get text h1\n'
+                 + 'get text p\n'
                  + 'eval "document.title"\n';
     const batch = run(['exec', '-', '--port', String(PORT)]);
     // A batch on stdin needs stdin; run() gives none, so use the file form for
@@ -700,7 +730,7 @@ describe('Agent CLI (Suite 8)', () => {
 
       const t1 = Date.now();
       anoa('open', 'example.com');
-      anoa('get', 'text', 'h1');
+      anoa('get', 'text', 'p');
       anoa('eval', 'document.title');
       const separateMs = Date.now() - t1;
 
@@ -930,6 +960,53 @@ describe('Agent CLI (Suite 8)', () => {
     assert.equal(darkIn('t1'), 'false', 'the override leaked into another tab');
 
     anoa('--tab', 'themed', 'tab', 'close');
+  });
+
+  // AGENT-45: exec detected --json on a line and then passed it through as an
+  // argument, so `get text --json` reached the page helper as
+  // __anoa.get("text", "--json") and the flag was eaten as the selector. The
+  // command reported success about the wrong thing, which is the shape of bug
+  // this codebase keeps producing.
+  //
+  // exec had no tests at all before this one.
+  it('exec honours --json on a line instead of passing it through', () => {
+    anoa('open', 'example.com');
+    anoa('wait', '--load', '--timeout', '10000');
+
+    const r = run([`--port`, String(PORT), 'exec', '-'], 'get text --json\n');
+    assert.equal(r.code, 0, r.err);
+
+    // The JSON shape, not the bare text — and crucially not an error about a
+    // selector named "--json". The page's wording is not the subject here, so
+    // this asserts the envelope and that something was actually read.
+    const parsed = JSON.parse(r.out);
+    assert.ok('value' in parsed, `expected a JSON object with a value, got ${r.out}`);
+    assert.equal(typeof parsed.value, 'string');
+    assert.ok(parsed.value.length > 0, 'got an empty page text');
+  });
+
+  // AGENT-46: the page helper lives in the document, so a navigation takes it
+  // with it. The session memoised "installed" and never looked again, so the
+  // second navigation on one connection left every later command talking to a
+  // page where __anoa does not exist.
+  //
+  // One navigation was fine, which is why this survived: the first install
+  // happens after it. It needs two to show, and exec had no tests.
+  it('exec survives more than one navigation on its connection', () => {
+    const script = [
+      'open example.com',
+      'snapshot -i',
+      'open https://www.iana.org/',
+      'snapshot -i',
+      '',
+    ].join('\n');
+
+    const r = run(['--port', String(PORT), 'exec', '-'], script);
+    assert.equal(r.code, 0, r.err);
+    assert.doesNotMatch(r.err, /__anoa is not defined/);
+    // Both snapshots produced refs, so both documents had the helper.
+    assert.ok((r.out.match(/@e\d+/g) || []).length >= 2,
+              `expected refs from both pages, got:\n${r.out}`);
   });
 
   // AGENT-36: wait --download with nothing downloading returns rather than

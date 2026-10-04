@@ -24,15 +24,29 @@
 
 namespace {
 
+// Where a command's output goes. Normally the process's own streams; while a
+// capture is installed, a string instead.
+//
+// Commands compute and print in the same breath — there is no cmdX that hands
+// a result back — so a caller that wants the text rather than the side effect
+// has to intercept it here. One indirection, and every command keeps working
+// exactly as written.
+struct Capture {
+    QTextStream out;
+    QTextStream err;
+    Capture(QString *o, QString *e) : out(o), err(e) {}
+};
+Capture *g_capture = nullptr;
+
 QTextStream &out()
 {
     static QTextStream s(stdout);
-    return s;
+    return g_capture ? g_capture->out : s;
 }
 QTextStream &err()
 {
     static QTextStream s(stderr);
-    return s;
+    return g_capture ? g_capture->err : s;
 }
 
 // Exit codes. Distinct on purpose: an agent retrying a flaky click should not
@@ -128,20 +142,48 @@ public:
     }
 
     // Runtime.evaluate with the helper script guaranteed to be installed.
-    // Installing on every call rather than once is deliberate: the page may
-    // have navigated since the last command, and this process has no way to
-    // know that without asking. The script returns early when it is already
-    // there, so the cost is a property read.
+    //
+    // The helper lives in the document, so a navigation takes it with it. The
+    // flag below used to be the whole answer — set once, trusted forever —
+    // and the comment here claimed the opposite of what the code did. A
+    // one-shot CLI process never noticed: it attaches fresh and installs
+    // *after* whatever navigation it caused. A connection that outlives a
+    // second navigation did notice, and `anoa exec` with two `open` lines
+    // failed every later command with "__anoa is not defined".
+    //
+    // So the flag is now a hint, confirmed by asking the page. Asking costs
+    // one tiny round trip; re-sending the script would cost 16 KB, and cmdOpen
+    // polls readyState up to 150 times while waiting for a load.
     bool installScript()
     {
-        if (m_installed)
+        if (m_installed && helperIsPresent())
             return true;
+        m_installed = false;
         QJsonObject boot;
         boot[QStringLiteral("expression")] = agentScript();
         boot[QStringLiteral("returnByValue")] = true;
         const CdpResult r = call(QStringLiteral("Runtime.evaluate"), boot);
         m_installed = r.ok;
         return m_installed;
+    }
+
+    // Does *this* document carry the current helper? Version, not mere
+    // presence: a page left over from an older build would otherwise look
+    // current and every command added since would fail against it.
+    bool helperIsPresent()
+    {
+        QJsonObject probe;
+        probe[QStringLiteral("expression")] =
+            QStringLiteral("!!(window.__anoa && window.__anoa.v === %1)")
+                .arg(kAgentScriptVersion);
+        probe[QStringLiteral("returnByValue")] = true;
+        const CdpResult r = call(QStringLiteral("Runtime.evaluate"), probe);
+        if (!r.ok)
+            return false;
+        return r.result.value(QStringLiteral("result"))
+            .toObject()
+            .value(QStringLiteral("value"))
+            .toBool();
     }
 
     QJsonValue evaluate(const QString &expression, QString *error)
@@ -1521,7 +1563,11 @@ int cmdExec(Session &session, QStringList args, bool json,
         if (verb == QStringLiteral("exec"))
             return fail(QStringLiteral("line %1: exec cannot nest").arg(lineNo), Usage);
 
-        const bool lineJson = json || tokens.contains(QStringLiteral("--json"));
+        // takeFlag, not contains: the flag has to come *out* of the line.
+        // Leaving it in sent `get text --json` to the page helper as
+        // __anoa.get("text", "--json"), where it was read as the selector and
+        // the command failed looking for an element named --json.
+        const bool lineJson = takeFlag(tokens, QStringLiteral("--json")) || json;
         const int rc = dispatchVerb(session, verb, tokens, lineJson, host, port);
         // Fail fast: step five almost always depends on step four, and running
         // the rest against a page that never got there wastes time and produces
@@ -1677,4 +1723,93 @@ int dispatchVerb(Session &session, const QString &verb, QStringList args, bool j
     }
 
     return fail(QStringLiteral("unknown command: %1").arg(verb), Usage);
+}
+
+// ── the long-lived connection ───────────────────────────────────────────────
+//
+// Defined here rather than in a header because Session is deliberately private
+// to this file: it blocks, and the comment above it explains why that is only
+// safe for a process that does one thing. A caller on the other side of this
+// facade gets a pointer and no way to misuse the internals.
+
+class AgentSession
+{
+public:
+    Session session;
+    QString host;
+    int port = 0;
+};
+
+namespace {
+
+// Installs a capture for exactly as long as one command runs. A guard rather
+// than a pair of assignments because a command that returns early — most of
+// them do — must still put the streams back.
+class CaptureGuard
+{
+public:
+    CaptureGuard(QString *o, QString *e) : m_capture(o, e) { g_capture = &m_capture; }
+    ~CaptureGuard()
+    {
+        // QTextStream buffers; without the flush the tail of a reply is lost.
+        m_capture.out.flush();
+        m_capture.err.flush();
+        g_capture = nullptr;
+    }
+
+private:
+    Capture m_capture;
+};
+
+} // namespace
+
+AgentSession *agentSessionOpen(const QString &host, int port, const QString &token,
+                               QString *why)
+{
+    auto *handle = new AgentSession;
+    handle->host = host;
+    handle->port = port;
+    if (!handle->session.attach(host, port, token, 10000)) {
+        if (why) {
+            *why = handle->session.why().isEmpty()
+                ? QStringLiteral("no browser on %1:%2").arg(host).arg(port)
+                : handle->session.why();
+        }
+        delete handle;
+        return nullptr;
+    }
+    return handle;
+}
+
+void agentSessionClose(AgentSession *session)
+{
+    delete session;
+}
+
+int agentSessionRun(AgentSession *session, const QString &verb, QStringList args,
+                    bool json, QString *outText, QString *errText)
+{
+    if (!session)
+        return NoBrowser;
+
+    QString captured, capturedErr;
+    int rc = Ok;
+    {
+        CaptureGuard guard(&captured, &capturedErr);
+        // `skills` answers out of the binary and never touches the browser —
+        // the same short circuit runAgentCommand makes, kept here so a caller
+        // does not have to know which verbs need a connection.
+        if (verb == QStringLiteral("skills"))
+            rc = runSkillsCommand(args);
+        else if (verb == QStringLiteral("exec"))
+            rc = cmdExec(session->session, args, json, session->host, session->port);
+        else
+            rc = dispatchVerb(session->session, verb, args, json,
+                              session->host, session->port);
+    }
+    if (outText)
+        *outText = captured;
+    if (errText)
+        *errText = capturedErr;
+    return rc;
 }

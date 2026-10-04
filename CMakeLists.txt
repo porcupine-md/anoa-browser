@@ -92,6 +92,10 @@ target_sources(anoa PRIVATE
     src/agent/agent_cli.cpp
     src/agent/agent_help.cpp
     src/agent/agent_skill.cpp
+    # MCP is HTTP and JSON, so unlike `terminal` there is nothing POSIX-only
+    # about it and Windows builds it too.
+    src/mcp/mcp_server.cpp
+    src/mcp/mcp_tools.cpp
     src/pdf/pdf_handler.cpp
 )
 

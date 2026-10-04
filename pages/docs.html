@@ -66,6 +66,7 @@
         <li><a href="#clients">Playwright, Puppeteer</a></li>
         <li><a href="#ports">Ports</a></li>
         <li><a href="#browser-domain">The Browser domain</a></li>
+        <li><a href="#mcp">MCP</a></li>
       </ul>
     </aside>
 
@@ -650,6 +651,39 @@ const browser = await puppeteer.connect({ browserURL: <b>'http://localhost:9222'
         <p style="margin-top:20px">Emulation set over CDP behaves the way it does from the
         CLI: an override belongs to the tab and outlives the connection that applied it, so a
         client that reconnects finds the page as it left it.</p>
+      </section>
+
+      <section id="mcp">
+        <h2>MCP</h2>
+        <p><code>POST /mcp</code> speaks the Model Context Protocol over Streamable HTTP, so
+        a client that cannot run a shell — Claude Desktop among them — drives this browser
+        with typed tools instead of a remembered command line.</p>
+<pre class="term"><span class="c">// the client's config</span>
+{
+  <b>"mcpServers"</b>: {
+    <b>"anoa"</b>: { <b>"url"</b>: <b>"http://localhost:9222/mcp"</b> }
+  }
+}</pre>
+        <p style="margin-top:16px">Every verb on this page is a tool, named
+        <code>browser_*</code> and carrying a JSON Schema for its arguments. One JSON-RPC
+        message in, one JSON response out; the server pushes nothing, so <code>GET /mcp</code>
+        answers <code>405</code> rather than holding a stream open forever.</p>
+        <p>It is the <em>same</em> browser the CLI drives. A tab opened from a shell is
+        visible to a tool call, a ref from <code>browser_snapshot</code> resolves either way,
+        and an override from <code>browser_set</code> outlives the call that made it.</p>
+        <div class="note">
+          <p><strong>A failed tool is a result, not a protocol error.</strong> It comes back
+          with <code>isError</code> and the command's own message. JSON-RPC errors are
+          reserved for a call that could not be parsed — a model needs to read a failure in
+          order to act on it, and an error at the transport layer is one it cannot see.</p>
+          <p><strong>One call at a time.</strong> Each occupies the connection, so a second
+          is refused immediately rather than queued behind it.</p>
+        </div>
+        <p style="margin-top:20px">Two guards. <code>--auth-token</code> covers it like every
+        other endpoint, as a bearer token or <code>?token=</code>. And an <code>Origin</code>
+        that is not in <code>--embed-origin</code> is refused with <code>403</code>: a page in
+        someone's browser can reach localhost through DNS rebinding, and a request carrying no
+        <code>Origin</code> at all — a real client, or curl — is the one that is allowed.</p>
       </section>
 
     </article>

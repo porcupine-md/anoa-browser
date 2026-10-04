@@ -174,7 +174,11 @@ const Group kGroups[] = {
   anoa close                        stop the browser; returns once it is gone
 
   Add --json to any command for machine-readable output.
-  Exit codes: 0 ok · 1 command failed · 2 usage · 3 no browser listening)"},
+  Exit codes: 0 ok · 1 command failed · 2 usage · 3 no browser listening
+
+  A client that drives tools rather than a shell can reach the same browser
+  over MCP: POST http://<host>:<port>/mcp, where every verb above is a tool
+  named browser_*.)"},
 };
 
 QTextStream &out()
