@@ -23,6 +23,7 @@
       <a class="opt" href="#drive">Drive</a>
       <a class="opt" href="#watch">Live view</a>
       <a class="opt" href="#terminal">Terminal</a>
+      <a class="opt" href="#mcp">MCP</a>
       <a class="opt" href="#install">Install</a>
       <a href="docs.html">Docs</a>
       <a href="https://github.com/porcupine-md/anoa-browser">GitHub</a>
@@ -36,8 +37,8 @@
       <div>
         <h1>A browser that <span class="g">takes commands</span>.</h1>
         <p class="lede">anoa is a real browser, driven from a shell, an HTTP endpoint,
-        or any CDP client. One binary, no driver to install, no headless-versus-real
-        distinction to reason about.</p>
+        any CDP client, or over MCP. One binary, no driver to install, no
+        headless-versus-real distinction to reason about.</p>
         <div class="badges">
           <span>latest <b>v0.17.0</b></span>
           <span>macOS · Linux · Windows</span>
@@ -185,6 +186,28 @@ const browser = await puppeteer.<b>connect</b>({ browserURL: 'http://localhost:9
     discovery and <code>/render/*</code>; <code>9223</code> is Chromium's own debugging
     port, kept internal; and the WebSocket the client is handed lands on
     <code>9224</code>, the proxy that multiplexes sessions and checks the token.</p>
+  </div>
+</section>
+
+<section id="mcp">
+  <div class="col">
+    <p class="eyebrow">Model Context Protocol</p>
+    <h2>And a door for a client with no shell at all</h2>
+    <p>The CLI wants a shell, and CDP wants a CDP client. <code>POST /mcp</code> wants
+    neither: it speaks the Model Context Protocol on the same port, so an agent picks
+    from a typed list of tools instead of remembering a command line.</p>
+  </div>
+
+<pre class="term"><span class="c">// the client's config — nothing else to install</span>
+{ <b>"mcpServers"</b>: { <b>"anoa"</b>: { <b>"url"</b>: <b>"http://localhost:9222/mcp"</b> } } }</pre>
+
+  <div class="col" style="margin-top:32px">
+    <p>Every command on this page is a tool, named <code>browser_*</code>, each with a
+    JSON Schema. It is the <em>same</em> browser — a tab opened from a shell is visible
+    to a tool call, and a ref from a snapshot resolves either way.</p>
+    <p>A tool that fails comes back as a result with <code>isError</code> and the
+    command's own message, not as a protocol error: a model has to read a failure to
+    act on it.</p>
   </div>
 </section>
 
