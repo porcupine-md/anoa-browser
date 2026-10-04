@@ -1,6 +1,6 @@
 # anoa
 
-> A real browser that takes commands. anoa is Chromium in one binary, driven from a shell, an HTTP endpoint, or any CDP client. There is no driver to install alongside it and no headless-versus-real distinction to reason about — `--headless` is a flag on the same executable.
+> A real browser that takes commands. anoa is Chromium in one binary, driven from a shell, an HTTP endpoint, any CDP client, or over MCP. There is no driver to install alongside it and no headless-versus-real distinction to reason about — `--headless` is a flag on the same executable.
 
 The browser is the session. Every command attaches to a browser that is already
 running and leaves it running, so the page, the cookies and the scroll position
