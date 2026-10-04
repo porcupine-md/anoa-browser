@@ -50,6 +50,7 @@ anoa-config-lib.dir/__/__/src/config/config.cpp
 anoa-terminal-bytes-lib.dir/__/__/src/terminal/frame_bytes.cpp
 anoa-terminal-ui-lib.dir/__/__/src/terminal/terminal_ui.cpp
 anoa-tab-ids-lib.dir/__/__/src/browser/tab_ids.cpp
+anoa-mcp-tools-lib.dir/__/__/src/mcp/mcp_tools.cpp
 "
 
 echo "==> configuring ${BUILD_DIR} (Qt: ${QT_PREFIX})"
@@ -65,6 +66,7 @@ cmake --build "${BUILD_DIR}" \
            anoa-test-frame-bytes \
            anoa-test-terminal-ui \
            anoa-test-tab-ids \
+           anoa-test-mcp-tools \
   -- -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
 
 # Stale counters from a previous run merge into this one and make the result a
