@@ -178,6 +178,42 @@ release: **Actions → Update Homebrew tap → Run workflow**, or
 sync the latest release; the run is idempotent and pushes nothing when the tap
 already matches.
 
+## Distro packages (OBS)
+
+The recipes in `packaging/obs/` build anoa against the **distribution's own
+Qt**, not a bundled copy — the opposite of every other channel here. The
+openSUSE Build Service compiles and hosts the result for openSUSE, Fedora,
+Debian and Ubuntu from that one set of files.
+
+Publish a release to it the same way the tap is resynced: **Actions → Update
+OBS → Run workflow**, or `gh workflow run update-obs.yml -f tag=vX.Y.Z`. Leave
+`tag` empty for the latest release. The run is idempotent and commits nothing
+when OBS already matches. It needs `OBS_USERNAME` and `OBS_PASSWORD` secrets
+and an `OBS_PROJECT` variable; without them it warns and exits 0 rather than
+failing, like the tap.
+
+Two things a packager has to get right, both of which cost a late and
+confusing failure when they are wrong:
+
+- **`PORTABLE_RPATH=OFF`.** Left on, the installed binary carries an RPATH of
+  `$ORIGIN/lib` naming a directory no package ships, and it does not start.
+- **`CMAKE_BUILD_TYPE=RelWithDebInfo`, not `Release`.** `CMakeLists.txt` adds a
+  link-time `-s` under `Release`, which strips the binary before rpm can
+  extract debug information from it. The build then fails at packaging time
+  with *"Empty %files file debugsourcefiles.list"* — a message that says
+  nothing about the strip flag that caused it.
+
+`scripts/validate_packaging.sh` checks both, plus that every path the spec
+claims is one CMake actually installs and that the Qt floor in the recipes
+matches `find_package(Qt6 ...)`. It runs in CI on every push and again on the
+rendered files before they are pushed to OBS — verify the artifact, not the
+working tree.
+
+**Ubuntu 22.04 cannot be targeted.** It ships Qt 6.2, below the 6.4 floor the
+build declares. Debian 12 ships exactly 6.4.2 and works; Ubuntu 24.04 works.
+22.04 users want the AppImage, which exists precisely because its glibc 2.35
+floor reaches further back than a distro package can.
+
 ### Verifying a release actually shipped
 
 Green CI is not the same as a working install. Worth checking by hand:

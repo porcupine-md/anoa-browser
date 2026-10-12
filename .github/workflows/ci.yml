@@ -392,3 +392,22 @@ jobs:
 
       - name: Validate templates
         run: bash scripts/validate_homebrew_templates.sh
+
+  # The distro packaging recipes, checked the same way and for the same reason.
+  # Cheaper than the tap check even: no Qt, no network, no build — it compares
+  # the spec and debian/ files against what CMakeLists.txt actually installs
+  # and what Qt floor it declares. ubuntu-22.04 ships rpm, so the spec gets a
+  # real parse here rather than the skip a developer's macOS gets.
+  packaging:
+    name: Packaging Recipes
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rpm, so the spec is parsed rather than skipped
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Validate packaging recipes
+        run: bash scripts/validate_packaging.sh

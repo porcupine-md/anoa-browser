@@ -1,0 +1,49 @@
+Source: anoa
+Section: web
+Priority: optional
+Maintainer: Eka Tresna Irawan <anak10thn@gmail.com>
+# Qt 6.4 is the floor the build declares (find_package(Qt6 6.4) in
+# CMakeLists.txt), and it is a real floor rather than a cautious one: Debian 12
+# ships exactly 6.4.2 and Ubuntu 22.04 ships 6.2, which cannot build this at
+# all. 22.04 users want the AppImage instead.
+#
+# libcups2-dev looks unrelated and is not: Qt6PrintSupport is a
+# WebEngineWidgets dependency, and without it cmake fails with the misleading
+# "Failed to find WebEngineWidgets".
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.16),
+               qt6-base-dev (>= 6.4),
+               qt6-webengine-dev (>= 6.4),
+               qt6-websockets-dev (>= 6.4),
+               libcups2-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/porcupine-md/anoa-browser
+Rules-Requires-Root: no
+
+Package: anoa
+Architecture: any
+# ${shlibs:Depends} covers everything linked, and the distribution's own
+# qt6-webengine package carries what Chromium dlopen()s. That is the difference
+# between this and the container image, which installs two dozen libraries by
+# hand because it unpacks a tarball with Qt bundled inside it.
+#
+# A font is what remains: nothing links one and nothing declares one, and
+# without it nothing renders as text — screenshots come back as boxes, which
+# reads as a broken browser rather than a missing font.
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         fonts-dejavu-core
+Description: a real browser that takes commands
+ anoa is Chromium in one binary, driven from a shell, an HTTP endpoint, any CDP
+ client, or over MCP. There is no driver to install alongside it and no
+ headless-versus-real distinction to reason about.
+ .
+ The browser is the session: every command attaches to a browser that is
+ already running and leaves it running, so the page, the cookies and the scroll
+ position survive between commands. That is what makes it usable one command at
+ a time, by a process that starts and exits, rather than only from inside a
+ long-lived script.
+ .
+ snapshot returns refs that later commands target, and clicks are hit-tested —
+ a button underneath a consent banner is reported rather than clicked through.
+ Both exist because the caller cannot see the screen.

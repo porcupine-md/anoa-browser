@@ -33,8 +33,9 @@ tests/
 ├── integration/    # vitest (*.test.js) + two bash suites (*.test.sh)
 ├── e2e/            # Playwright (TS) and Puppeteer (JS) against a running binary
 └── regression/     # smoke.sh — fast post-commit check of the 5 critical paths
+packaging/obs/      # distro recipes — built against SYSTEM Qt, not a bundled copy
 .github/
-├── workflows/      # ci.yml, release.yml, update-homebrew-tap.yml
+├── workflows/      # ci.yml, release.yml, update-homebrew-tap.yml, update-obs.yml
 ├── homebrew/       # anoa.rb.tpl (cask), anoa-linux.rb.tpl (formula)
 └── entitlements/   # anoa.entitlements for macOS codesigning
 ```
@@ -163,6 +164,14 @@ tests/
   `find_package(Qt6 6.4)` and distro builds really do use 6.4; CI's 6.7.3 will not
   catch the regression. `QWebSocket::errorOccurred` (6.5+) already needed a
   `QT_VERSION_CHECK` fallback.
+- **Distro packages build against system Qt** (`packaging/obs/`), where two
+  flags are load-bearing: `PORTABLE_RPATH=OFF`, or the installed binary carries
+  an RPATH naming a directory no package ships and never starts; and
+  `CMAKE_BUILD_TYPE=RelWithDebInfo` rather than `Release`, because the `-s` this
+  CMakeLists adds under Release strips the binary before rpm can extract debug
+  info — the build then fails at packaging time with "Empty %files file
+  debugsourcefiles.list", which names neither cause. `scripts/validate_packaging.sh`
+  checks both.
 - `parseArgs()` prints `Warning: --auth-token is not set; ...` unconditionally, so
   `anoa terminal` prints it too even though terminal mode starts no CDP
   server. Known noise — tests filter stderr on the `anoa terminal: ` prefix

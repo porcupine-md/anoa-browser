@@ -1,0 +1,6 @@
+anoa ({{VERSION}}-1) unstable; urgency=medium
+
+  * Release {{VERSION}}. See the GitHub release notes for what changed:
+    https://github.com/porcupine-md/anoa-browser/releases/tag/v{{VERSION}}
+
+ -- Eka Tresna Irawan <anak10thn@gmail.com>  {{DATE}}
