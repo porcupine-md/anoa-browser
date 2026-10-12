@@ -1,0 +1,39 @@
+#!/usr/bin/make -f
+# anoa for Debian and Ubuntu, built against the distribution's Qt.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	# PORTABLE_RPATH=OFF is the packager's switch, and CMakeLists.txt says so
+	# where it is defined: left on, the installed binary carries an RPATH of
+	# $$ORIGIN/lib naming a directory no package ships, and it does not start.
+	#
+	# RelWithDebInfo, not Release: CMakeLists.txt adds a link-time `-s` under
+	# Release, and a stripped binary leaves dh_strip nothing to put in the
+	# -dbgsym package.
+	#
+	# The version is passed in because the git tag is the single source of
+	# truth everywhere else; CMakeLists.txt's own number is only a local
+	# default.
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DPORTABLE_RPATH=OFF \
+		-DANOA_VERSION_OVERRIDE={{VERSION}}
+
+override_dh_auto_install:
+	dh_auto_install
+	# CMakeLists.txt installs the licence to share/licenses/anoa, which is what
+	# Arch and Fedora look at and is not a path Debian uses. Here dh_installdocs
+	# puts debian/copyright at share/doc/anoa/copyright instead, so the extra
+	# copy is both a duplicate and a policy violation.
+	rm -rf debian/anoa/usr/share/licenses
+
+override_dh_auto_test:
+	# Enough to prove it links against the system Qt and starts. Anything that
+	# renders a page belongs outside a build chroot, where QtWebEngine's zygote
+	# can have the namespaces it wants. offscreen because --version still
+	# constructs the application object and a buildd has no display.
+	QT_QPA_PLATFORM=offscreen $(CURDIR)/obj-$(DEB_HOST_GNU_TYPE)/anoa --version

@@ -1,0 +1,133 @@
+name: Update OBS
+
+# Publishes the packaging recipes to the openSUSE Build Service, which builds
+# and hosts the actual packages for openSUSE, Fedora, Debian and Ubuntu.
+#
+# Modelled on update-homebrew-tap.yml, which solves the same shape: render
+# templates with a release's version, validate the *rendered* output, push to an
+# external service, and do nothing at all when it already matches. The
+# differences are the transport (osc rather than git) and that OBS needs the
+# source tarball uploaded alongside the recipes.
+#
+# workflow_dispatch only, deliberately. The tap earned its place in release.yml
+# after it had been run by hand enough times to be trusted; this has not.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (empty = latest release)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-obs:
+    name: Push recipes to OBS
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view --json tagName --jq .tagName)
+          fi
+          gh release view "$TAG" --json tagName >/dev/null
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $TAG"
+
+      - name: Render the recipes
+        id: render
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          # Two date formats, because the two changelogs disagree: Debian
+          # insists on RFC 2822, rpm wants "Day Mon DD YYYY" and warns that it
+          # cannot derive a build date when the changelog is empty.
+          DATE=$(date -R)
+          DATE_RPM=$(date '+%a %b %d %Y')
+
+          mkdir -p /tmp/obs
+          for f in packaging/obs/*; do
+            sed -e "s/{{VERSION}}/${VERSION}/g" \
+                -e "s/{{DATE}}/${DATE}/g" \
+                -e "s/{{DATE_RPM}}/${DATE_RPM}/g" \
+                "$f" > "/tmp/obs/$(basename "$f")"
+          done
+
+          # OBS builds from a source tarball it holds itself rather than
+          # fetching at build time, so the archive goes up with the recipes.
+          # GitHub generates it for every tag at a predictable URL.
+          curl -fsSL -o "/tmp/obs/anoa-${VERSION}.tar.gz" \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+
+          # The .dsc carries the tarball's checksum and size, so they are filled
+          # in once the file exists rather than templated.
+          SUM=$(md5sum "/tmp/obs/anoa-${VERSION}.tar.gz" | awk '{print $1}')
+          SIZE=$(stat -c%s "/tmp/obs/anoa-${VERSION}.tar.gz")
+          sed -i "s|^ 00000000000000000000000000000000 0 | ${SUM} ${SIZE} |" \
+            /tmp/obs/anoa.dsc
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Verify the artifact, not the working tree — the rule this repository
+      # learned from a tap that shipped broken for nine releases (issue #37).
+      - name: Validate the rendered recipes
+        run: bash scripts/validate_packaging.sh /tmp/obs
+
+      - name: Push to OBS
+        env:
+          OBS_USERNAME: ${{ secrets.OBS_USERNAME }}
+          OBS_PASSWORD: ${{ secrets.OBS_PASSWORD }}
+          OBS_PROJECT: ${{ vars.OBS_PROJECT }}
+        run: |
+          set -euo pipefail
+          # Same convention as the tap: a release must not fail because
+          # publishing is not configured yet.
+          if [ -z "${OBS_USERNAME:-}" ] || [ -z "${OBS_PASSWORD:-}" ]; then
+            echo "::warning::OBS_USERNAME/OBS_PASSWORD not set — skipping the OBS update"
+            exit 0
+          fi
+          PROJECT="${OBS_PROJECT:-home:${OBS_USERNAME}}"
+
+          pip install --quiet osc
+          mkdir -p ~/.config/osc
+          cat > ~/.config/osc/oscrc <<EOF
+          [general]
+          apiurl = https://api.opensuse.org
+          [https://api.opensuse.org]
+          user = ${OBS_USERNAME}
+          pass = ${OBS_PASSWORD}
+          EOF
+          chmod 600 ~/.config/osc/oscrc
+
+          cd /tmp
+          osc checkout "${PROJECT}" anoa -o /tmp/obs-checkout 2>/dev/null \
+            || osc meta pkg -F - "${PROJECT}" anoa <<'META'
+          <package name="anoa"><title>anoa</title>
+          <description>A real browser that takes commands</description></package>
+          META
+          [ -d /tmp/obs-checkout ] || osc checkout "${PROJECT}" anoa -o /tmp/obs-checkout
+
+          # Replace the recipe set wholesale: a file left behind from an older
+          # version is a file OBS will try to build.
+          rm -f /tmp/obs-checkout/*
+          cp /tmp/obs/* /tmp/obs-checkout/
+
+          cd /tmp/obs-checkout
+          osc addremove
+          if osc status | grep -q '^[AMD]'; then
+            osc commit -m "anoa ${{ steps.render.outputs.version }}"
+            echo "Pushed anoa ${{ steps.render.outputs.version }} to ${PROJECT}"
+          else
+            echo "OBS already matches ${{ steps.render.outputs.version }} — nothing to push"
+          fi
