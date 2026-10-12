@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "test:playwright": "playwright test",
-    "test:puppeteer": "node --test puppeteer.test.js"
+    "test:puppeteer": "node --test puppeteer.test.js",
+    "test:e2b": "node --test e2b.test.js"
   },
   "dependencies": {
     "@playwright/test": "^1.44.0",
+    "e2b": "^2.55.0",
     "puppeteer-core": "^25.7.0"
   }
 }

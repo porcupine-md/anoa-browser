@@ -26,6 +26,7 @@ flakes` in ~/.config/nix/nix.conf before any of those commands work.
 - [README](https://github.com/porcupine-md/anoa-browser#readme): the same ground plus the HTTP endpoints and CDP details
 - [Releases](https://github.com/porcupine-md/anoa-browser/releases): prebuilt packages for every platform
 - [Building from source](https://github.com/porcupine-md/anoa-browser/blob/master/docs/BUILDING.md): prerequisites, targets, release process
+- [In an E2B sandbox](https://github.com/porcupine-md/anoa-browser/blob/master/docs/E2B.md): run anoa in a cloud microVM — the template, and the MCP, CDP and HTTP URLs each sandbox publishes
 
 ## The core loop
 

@@ -260,6 +260,36 @@ docker run --rm -p 9222:9222 ghcr.io/porcupine-md/anoa-browser \
   --headless --no-sandbox --port 9222 --auth-token "$SECRET"
 ```
 
+### E2B sandbox (cloud)
+
+A browser that is not your machine. [E2B](https://e2b.dev) boots a Firecracker
+microVM from a template in about a second and publishes every port inside it at
+its own https URL, so an agent anywhere can drive a Chromium that belongs to
+nobody else and disappears with the sandbox.
+
+```bash
+cd integrations/e2b && npm install
+printf 'E2B_API_KEY=e2b_your_key\n' > .env
+node --env-file=.env template.js          # builds the template on E2B, about 90s
+```
+
+```js
+import { Sandbox } from 'e2b';
+import { startAnoa } from './integrations/e2b/anoa.js';
+
+const sandbox = await Sandbox.create('anoa', { timeoutMs: 300_000 });
+const anoa = await startAnoa(sandbox);
+
+anoa.mcpUrl;  // https://9222-<sandbox-id>.e2b.app/mcp
+anoa.cdpUrl;  // wss://9224-<sandbox-id>.e2b.app/devtools/browser/…?token=…
+```
+
+No Docker and no registry: E2B builds the template itself, installing the same
+release tarball every other channel installs. MCP, the `/render` endpoints, CDP
+for Puppeteer and Playwright, and the CLI inside the sandbox all work there — a
+sandbox URL is public, so `startAnoa` always starts the browser behind
+`--auth-token`. Walkthrough, ports and costs: **[docs/E2B.md](docs/E2B.md)**.
+
 ### Windows
 
 Download `anoa-windows-x86_64.zip` from [Releases](https://github.com/porcupine-md/anoa-browser/releases) and run `anoa.exe`.

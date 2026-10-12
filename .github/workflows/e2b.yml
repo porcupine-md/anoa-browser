@@ -1,0 +1,99 @@
+name: E2B
+
+# Builds the E2B template from a published release and drives a real sandbox
+# with it. Manual, like the tap and OBS workflows were before they were
+# trusted: it spends money (a template build and a sandbox) and it publishes a
+# template other people's sandboxes boot from, neither of which belongs on a
+# push trigger.
+#
+# Actions → "E2B" → Run workflow. Needs the E2B_API_KEY secret; without it the
+# job says so and stops green, so a release is never failed by publishing that
+# was simply never configured.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build the template from (e.g. v0.17.0). Empty = latest.'
+        required: false
+        default: ''
+      template:
+        description: 'E2B template name'
+        required: false
+        default: 'anoa'
+      test:
+        description: 'Run the e2e suite against the template afterwards'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  template:
+    name: Build template and drive a sandbox
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    env:
+      E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+      ANOA_E2B_TEMPLATE: ${{ inputs.template }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the key
+        id: key
+        run: |
+          if [ -z "${E2B_API_KEY}" ]; then
+            echo "::warning::E2B_API_KEY is not set — nothing to build. See docs/E2B.md."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 20.18.1 is the floor the E2B SDK states, and 21 is excluded by it.
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.configured == 'true'
+        with:
+          node-version: '22'
+
+      - name: Resolve release tag
+        if: steps.key.outputs.configured == 'true'
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build the template
+        if: steps.key.outputs.configured == 'true'
+        working-directory: integrations/e2b
+        run: |
+          set -euo pipefail
+          npm install
+          node template.js --version "${{ steps.tag.outputs.tag }}" --name "${{ inputs.template }}"
+
+      # The suite is the only thing that proves the template is usable rather
+      # than merely built: it boots a sandbox from it and drives the browser.
+      - name: Run the e2e suite
+        if: steps.key.outputs.configured == 'true' && inputs.test
+        working-directory: tests/e2e
+        run: |
+          set -euo pipefail
+          npm install
+          node --test e2b.test.js
+
+      - name: Summary
+        if: always() && steps.key.outputs.configured == 'true'
+        run: |
+          {
+            echo "### E2B template"
+            echo "- template: \`${{ inputs.template }}\`"
+            echo "- anoa: \`${{ steps.tag.outputs.tag }}\`"
+            echo "- boot it with: \`Sandbox.create('${{ inputs.template }}')\`"
+          } >> "$GITHUB_STEP_SUMMARY"

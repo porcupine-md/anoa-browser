@@ -86,6 +86,12 @@ packaging/obs/      # distro recipes — built against SYSTEM Qt, not a bundled 
 - **E2E**: `cd tests/e2e && npm install`, then `npx playwright test` (needs
   `npx playwright install --with-deps chromium`) and `node --test puppeteer.test.js`.
   Both attach to an already-running `anoa`; the test does not start it.
+- **E2B (cloud)**: `cd tests/e2e && node --test e2b.test.js` — the one suite that
+  starts its own browser, because it starts its own *machine*: it boots an E2B
+  sandbox from the `anoa` template and drives it over the public URL. Needs
+  `E2B_API_KEY` and skips without it, costs a sandbox, and takes about 80 seconds
+  — 60 of them deliberate, waiting past the command timeout that kills a
+  supervised browser. Not run by CI on push; see the **E2B** workflow.
 - **Regression**: `bash tests/regression/smoke.sh` — same `ANOA_BINARY`/`ANOA_PORT`
   contract.
 - Tests run against a **real browser process**, never a mock. Each vitest and bash
@@ -290,6 +296,14 @@ packaging/obs/      # distro recipes — built against SYSTEM Qt, not a bundled 
 - **Homebrew** is the distribution channel: `.github/homebrew/*.tpl` are rendered by
   `update-homebrew-tap.yml` on release. macOS builds are codesigned/notarized using
   `.github/entitlements/anoa.entitlements`.
+- **E2B** (`integrations/e2b/`) runs anoa in a cloud sandbox. The template is built
+  by E2B itself from the published release tarball — no Docker, no registry — and
+  `template.js` reads the Chromium runtime package list out of the `Dockerfile`
+  rather than repeating it, so adding a library there reaches both. `startAnoa()`
+  starts the browser with `nohup`: the SDK's background command is supervised and
+  killed at its 60s timeout, which no test shorter than a minute would notice.
+  Driven by `tests/e2e/e2b.test.js`, which skips without `E2B_API_KEY`, and by the
+  manual **E2B** workflow. See `docs/E2B.md`.
 
 ---
 
