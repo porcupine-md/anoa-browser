@@ -949,4 +949,12 @@ environments want are in [docs/BUILDING.md](docs/BUILDING.md#headless-machines).
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Eka Tresna Irawan.
+
+That covers anoa's own source. The **binaries** are a separate question: the
+AppImage and the portable tarballs bundle Qt and QtWebEngine, which are
+LGPLv3, and QtWebEngine carries Chromium's own BSD-style notices. Redistributing
+those builds therefore carries the LGPL's obligations — the licence texts have
+to travel with them, and recipients have to be able to relink against their own
+Qt. Building against a distribution's system Qt, which is what a distro package
+does, avoids the bundling question entirely.

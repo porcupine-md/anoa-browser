@@ -228,6 +228,12 @@ install(FILES resources/anoa.desktop
 install(FILES resources/anoa.svg
     DESTINATION share/icons/hicolor/scalable/apps
 )
+# Packagers expect the licence text to ship with the package, and several
+# distributions check for it. share/licenses is what Arch and Fedora look at;
+# Debian's tooling puts its own copy under share/doc and ignores this one.
+install(FILES LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/licenses/anoa
+)
 
 # Tests
 option(BUILD_TESTS "Build unit and integration test targets" OFF)
