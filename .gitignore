@@ -56,3 +56,8 @@ result-*
 # deploy pages`. Local tool state, and its cache holds the Cloudflare account
 # id and project name — neither belongs in a public repository.
 .wrangler/
+
+# An E2B API key lives in integrations/e2b/.env when the template is built by
+# hand. A key is a credential, and the pattern is broad on purpose: no .env
+# anywhere in this repository is ever something to commit.
+.env

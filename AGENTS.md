@@ -281,6 +281,14 @@ tests/
 - **Homebrew** is the distribution channel: `.github/homebrew/*.tpl` are rendered by
   `update-homebrew-tap.yml` on release. macOS builds are codesigned/notarized using
   `.github/entitlements/anoa.entitlements`.
+- **E2B** (`integrations/e2b/`) runs anoa in a cloud sandbox. The template is built
+  by E2B itself from the published release tarball — no Docker, no registry — and
+  `template.js` reads the Chromium runtime package list out of the `Dockerfile`
+  rather than repeating it, so adding a library there reaches both. `startAnoa()`
+  starts the browser with `nohup`: the SDK's background command is supervised and
+  killed at its 60s timeout, which no test shorter than a minute would notice.
+  Driven by `tests/e2e/e2b.test.js`, which skips without `E2B_API_KEY`, and by the
+  manual **E2B** workflow. See `docs/E2B.md`.
 
 ---
 

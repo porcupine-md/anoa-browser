@@ -1,0 +1,14 @@
+{
+  "name": "anoa-e2b",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Run anoa inside an E2B sandbox: template definition and the helper that starts the browser.",
+  "main": "anoa.js",
+  "scripts": {
+    "build-template": "node template.js"
+  },
+  "dependencies": {
+    "e2b": "^2.55.0"
+  }
+}
