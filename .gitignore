@@ -51,3 +51,8 @@ node_modules
 # nix build output symlink
 result
 result-*
+
+# wrangler's working directory, created in the repo root by `wrangler pages
+# deploy pages`. Local tool state, and its cache holds the Cloudflare account
+# id and project name — neither belongs in a public repository.
+.wrangler/
