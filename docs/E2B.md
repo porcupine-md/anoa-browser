@@ -98,6 +98,11 @@ anoa arguments such as `--ephemeral`, and `readyTimeoutMs`.
 If the browser never comes up, the error carries `/tmp/anoa.log` from inside the
 sandbox rather than a timeout with no cause.
 
+`anoa.js` is not published to npm and imports nothing but `node:crypto` and the
+E2B SDK, so copy it into your project if you would rather not depend on a
+checkout of this repository. It is a hundred lines, and the only part that is
+not obvious is the WebSocket rewrite below.
+
 ---
 
 ## 3. Three ways to drive it
