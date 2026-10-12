@@ -218,8 +218,14 @@ Kill the sandbox in a `finally`. An orphaned one keeps a browser running and
 billing until its timeout, and the sandbox is also the only thing holding that
 browser — `anoa close` or killing the process leaves the sandbox up.
 
-`Sandbox.list()` shows what is still running; `e2b sandbox kill <id>` stops one
-from a terminal.
+To find the ones you forgot — `Sandbox.list()` hands back a paginator, not an
+array, which is a five-minute mistake to make once:
+
+```js
+for (const s of await Sandbox.list().nextItems()) await Sandbox.kill(s.sandboxId);
+```
+
+`e2b sandbox list` and `e2b sandbox kill <id>` do the same from a terminal.
 
 ---
 
