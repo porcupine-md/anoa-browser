@@ -85,6 +85,12 @@ tests/
 - **E2E**: `cd tests/e2e && npm install`, then `npx playwright test` (needs
   `npx playwright install --with-deps chromium`) and `node --test puppeteer.test.js`.
   Both attach to an already-running `anoa`; the test does not start it.
+- **E2B (cloud)**: `cd tests/e2e && node --test e2b.test.js` — the one suite that
+  starts its own browser, because it starts its own *machine*: it boots an E2B
+  sandbox from the `anoa` template and drives it over the public URL. Needs
+  `E2B_API_KEY` and skips without it, costs a sandbox, and takes about 80 seconds
+  — 60 of them deliberate, waiting past the command timeout that kills a
+  supervised browser. Not run by CI on push; see the **E2B** workflow.
 - **Regression**: `bash tests/regression/smoke.sh` — same `ANOA_BINARY`/`ANOA_PORT`
   contract.
 - Tests run against a **real browser process**, never a mock. Each vitest and bash
