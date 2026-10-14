@@ -34,10 +34,24 @@ CMAKE_RELEASE := $(CMAKE_BASE_FLAGS) -DCMAKE_BUILD_TYPE=Release
 
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 
+# ── Website ──────────────────────────────────────────────────────────────────
+# pages/ is a Cloudflare Pages project with no Git integration: merging to
+# master publishes nothing, and the site has twice drifted releases behind.
+PAGES_DIR     ?= pages
+PAGES_PROJECT ?= anoa-browser
+PAGES_URL     ?= https://anoa.jonggrang.dev
+WRANGLER      ?= npx --yes wrangler@4
+
+# Not a credential — an account id. The login carries eight accounts, and
+# without this wrangler picks none and some subcommands return nothing
+# instead of failing. Override it to keep it out of the repo.
+CLOUDFLARE_ACCOUNT_ID ?= 9be807bd54837c5a15b24b573061f5bc
+
 .PHONY: all build configure static release release-static \
         clean clean-static clean-release clean-release-static clean-all \
         install install-static \
-        test coverage lint help
+        test coverage lint help \
+        publish site-status
 
 # ── Default ──────────────────────────────────────────────────────────────────
 all: build
@@ -115,6 +129,27 @@ clean-all:
 	rm -rf $(BUILD_DIR) $(BUILD_DIR_STATIC) $(BUILD_DIR_REL) $(BUILD_DIR_RELST) \
 	       $(BUILD_DIR_COV) dist
 
+# ── Website ──────────────────────────────────────────────────────────────────
+# Deploys the working tree, not a commit. --branch is the branch you are on:
+# Cloudflare treats only master as Production, so this from a feature branch
+# gives a preview URL and leaves the live site alone.
+publish:
+	CLOUDFLARE_ACCOUNT_ID=$(CLOUDFLARE_ACCOUNT_ID) $(WRANGLER) pages deploy $(PAGES_DIR) \
+	  --project-name $(PAGES_PROJECT) \
+	  --branch "$$(git rev-parse --abbrev-ref HEAD)" \
+	  --commit-hash "$$(git rev-parse HEAD)" \
+	  --commit-message "$$(git log -1 --format=%s)"
+	@$(MAKE) --no-print-directory site-status
+
+# The question this project keeps getting wrong: merged has never meant
+# published here. `publish` ends with it, because a deploy that published
+# nothing looks exactly like one that worked.
+site-status:
+	@want=$$(sed -n 's/^project(anoa VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt); \
+	 live=$$(curl -fsS $(PAGES_URL)/ | sed -n 's/.*latest <b>v\([0-9.]*\)<\/b>.*/\1/p' | head -1); \
+	 echo "repo: $$want   live: $${live:-unknown}   $(PAGES_URL)"; \
+	 [ "$$want" = "$$live" ] || echo "   ^ not the same — the deploy has not landed (or has not propagated yet)"
+
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:
 	@echo ""
@@ -139,8 +174,12 @@ help:
 	@echo "  make clean-release-static   Remove static release build dir"
 	@echo "  make clean-all              Remove all build dirs and dist/"
 	@echo ""
+	@echo "  make publish                Deploy $(PAGES_DIR)/ to Cloudflare Pages"
+	@echo "  make site-status            Version in CMakeLists.txt vs the live site"
+	@echo ""
 	@echo "Variables (override on command line):"
 	@echo "  QT_PREFIX=$(QT_PREFIX)"
 	@echo "  INSTALL_PREFIX=$(INSTALL_PREFIX)"
 	@echo "  JOBS=$(JOBS)"
+	@echo "  PAGES_PROJECT=$(PAGES_PROJECT)"
 	@echo ""

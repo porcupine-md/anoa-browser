@@ -135,14 +135,23 @@ footer .links{margin-left:auto;display:flex;gap:18px;font-size:14px}
 /* Two columns on wide screens: a table of contents that stays put, and the
    prose. One column below that, with the contents collapsed to the top. */
 .docs{display:grid;gap:48px;grid-template-columns:210px minmax(0,1fr);align-items:start;padding:44px 0 96px}
-@media (max-width:900px){.docs{grid-template-columns:1fr;gap:28px}}
+/* minmax(0,…), not 1fr: a bare 1fr floors at the content's min-content width,
+   and the widest terminal block then pushes the whole page sideways — 576px of
+   horizontal scroll on a 390px screen, with the prose off to the right. */
+@media (max-width:900px){.docs{grid-template-columns:minmax(0,1fr);gap:28px}}
 
 .toc{position:sticky;top:76px;font-size:14px}
-@media (max-width:900px){.toc{position:static;border:1px solid var(--rule-soft);border-radius:10px;padding:16px 18px;background:var(--paper)}}
 .toc h4{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;font-weight:600}
 .toc ul{list-style:none;margin:0 0 22px;padding:0;display:flex;flex-direction:column;gap:7px}
 .toc a{color:var(--ink-2);text-decoration:none;display:block;line-height:1.35}
 .toc a:hover{color:var(--accent)}
+/* After the rules above, not before them — same specificity, so the later one
+   wins. Stacked, 28 links are 972px of contents before the first word of
+   prose, more than a phone screen; wrapped into rows it is 520px. */
+@media (max-width:900px){
+  .toc{position:static;border:1px solid var(--rule-soft);border-radius:10px;padding:16px 18px;background:var(--paper)}
+  .toc ul{flex-direction:row;flex-wrap:wrap;gap:10px 16px;margin-bottom:18px}
+}
 
 .docs article > section{padding:0 0 52px;border:0}
 .docs article > section:first-child{padding-top:0}
