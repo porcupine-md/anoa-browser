@@ -690,6 +690,9 @@ jobs:
         run: |
           windeployqt build\Release\anoa.exe --release --no-translations --no-opengl-sw
           $qtDir = $env:QT_ROOT_DIR
+          # --headless/--version/--help force QT_QPA_PLATFORM=offscreen (src/main.cpp);
+          # windeployqt never ships that plugin (issue #51).
+          Copy-Item -Path "$qtDir\plugins\platforms\qoffscreen.dll" -Destination "build\Release\platforms\" -Force
           New-Item -ItemType Directory -Path "build\Release\resources" -Force | Out-Null
           Copy-Item -Path "$qtDir\resources\*" -Destination "build\Release\resources\" -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path "build\Release\translations\qtwebengine_locales" -Force | Out-Null
@@ -719,6 +722,21 @@ jobs:
           }
           if ($text -notmatch 'not supported on Windows') {
             throw "anoa terminal did not print the unsupported-platform error"
+          }
+
+      # Exercises the offscreen path the copy above serves; went missing in
+      # v0.18.0 while every windowed check still passed (issue #51).
+      - name: Verify --version runs headless
+        shell: pwsh
+        working-directory: build\Release
+        run: |
+          $out = & .\anoa.exe --version 2>&1
+          Write-Host "exit=$LASTEXITCODE output=$($out -join ' ')"
+          if ($LASTEXITCODE -ne 0) {
+            throw "anoa --version exited $LASTEXITCODE"
+          }
+          if (($out -join ' ') -notmatch 'anoa') {
+            throw "anoa --version did not print a version line"
           }
 
       - name: Package
