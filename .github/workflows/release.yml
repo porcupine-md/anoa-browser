@@ -690,6 +690,14 @@ jobs:
         run: |
           windeployqt build\Release\anoa.exe --release --no-translations --no-opengl-sw
           $qtDir = $env:QT_ROOT_DIR
+          # --headless, --version/-v and --help/-h force QT_QPA_PLATFORM=offscreen
+          # in src/main.cpp before any application object exists, and windeployqt
+          # never ships the offscreen plugin: the zip aborted with "Could not
+          # find the Qt platform plugin \"offscreen\"" while windowed mode
+          # worked, which read like a code bug and was not one. macOS copies its
+          # offscreen plugin explicitly for the same reason; Linux takes the
+          # whole platforms/ directory.
+          Copy-Item -Path "$qtDir\plugins\platforms\qoffscreen.dll" -Destination "build\Release\platforms\" -Force
           New-Item -ItemType Directory -Path "build\Release\resources" -Force | Out-Null
           Copy-Item -Path "$qtDir\resources\*" -Destination "build\Release\resources\" -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path "build\Release\translations\qtwebengine_locales" -Force | Out-Null
@@ -719,6 +727,25 @@ jobs:
           }
           if ($text -notmatch 'not supported on Windows') {
             throw "anoa terminal did not print the unsupported-platform error"
+          }
+
+      # The plugin copied above is exercised only by the offscreen paths:
+      # --headless, --version and --help (src/main.cpp). --version is the
+      # cheapest to run, and the same command the Homebrew Linux formula uses
+      # as its test. Without qoffscreen.dll this step aborts with "Could not
+      # find the Qt platform plugin \"offscreen\"" while every windowed check
+      # still passes — which is exactly how v0.18.0 shipped broken (issue #51).
+      - name: Verify --version runs headless
+        shell: pwsh
+        working-directory: build\Release
+        run: |
+          $out = & .\anoa.exe --version 2>&1
+          Write-Host "exit=$LASTEXITCODE output=$($out -join ' ')"
+          if ($LASTEXITCODE -ne 0) {
+            throw "anoa --version exited $LASTEXITCODE"
+          }
+          if (($out -join ' ') -notmatch 'anoa') {
+            throw "anoa --version did not print a version line"
           }
 
       - name: Package
