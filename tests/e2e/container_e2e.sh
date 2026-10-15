@@ -57,28 +57,46 @@ started=$?
 check "container starts" "$started"
 [ "$started" = "0" ] || { echo; echo "Container E2E: $passed passed, $failed failed"; exit 1; }
 
-# Poll rather than sleep: cold start is a property of the machine.
+# The image starts with --auth-token auto, so the token exists only in the log.
+# Reading it from there is the documented way in, and so the one tested.
+tok=""
 ready=1
+# Poll rather than sleep: cold start is a property of the machine.
 for _ in $(seq 1 60); do
-    if curl -fsS "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then ready=0; break; fi
+    [ -n "$tok" ] || tok="$($ENGINE logs "$NAME" 2>&1 | sed -n 's/^anoa: token  //p' | tr -d '\r' | head -n1)"
+    if [ -n "$tok" ] && curl -fsS "http://127.0.0.1:${PORT}/json/version?token=${tok}" >/dev/null 2>&1; then ready=0; break; fi
     sleep 1
 done
+[ -n "$tok" ]; check "the log carries a generated token" "$?"
 check "CDP endpoint answers from outside the container" "$ready"
 if [ "$ready" != "0" ]; then
     echo "--- container log ---"; $ENGINE logs "$NAME" 2>&1 | tail -20
     echo; echo "Container E2E: $passed passed, $failed failed"; exit 1
 fi
 
-ver="$(curl -fsS "http://127.0.0.1:${PORT}/json/version" | tr -d '\n')"
+ver="$(curl -fsS "http://127.0.0.1:${PORT}/json/version?token=${tok}" | tr -d '\n')"
 echo "$ver" | grep -q '"Browser": *"anoa/' ; check "reports itself as anoa" "$?" "$ver"
+
+code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/json/version")"
+[ "$code" = "401" ]; check "refuses a request without the token" "$?" "got $code"
+
+$ENGINE logs "$NAME" 2>&1 | grep -q "^anoa: setup  http://.*/setup?token=${tok}"
+check "the log points at /setup with the token" "$?"
+curl -fsS "http://127.0.0.1:${PORT}/setup" | grep -q 'Connect to this anoa'
+check "/setup is served without the token" "$?"
+
+mcp="$(curl -fsS "http://127.0.0.1:${PORT}/mcp" -H "Authorization: Bearer ${tok}" \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser_skills","arguments":{"what":"core"}}}')"
+echo "$mcp" | grep -q 'Driving a browser'; check "MCP hands out the workflow" "$?" "$(echo "$mcp" | head -c 160)"
 
 # The agent CLI, run inside the container against the browser in the same
 # container. This is the shape a CI job or an agent sandbox would use.
 # Two helpers on purpose. `inside` merges stderr because a failing command's
 # reason belongs in the report; `value` keeps it out, because anything Qt or
 # Chromium writes there would otherwise be parsed as part of the answer.
-inside() { $ENGINE exec "$NAME" anoa "$@" 2>&1; }
-value()  { $ENGINE exec "$NAME" anoa "$@" 2>/dev/null | tr -d '\r'; }
+inside() { $ENGINE exec "$NAME" anoa "$@" --token "$tok" 2>&1; }
+value()  { $ENGINE exec "$NAME" anoa "$@" --token "$tok" 2>/dev/null | tr -d '\r'; }
 
 # The first navigation in a cold container is the slowest thing here: Chromium
 # is starting its renderer, DNS is uncached and TLS is unresumed. Retry rather
@@ -120,7 +138,7 @@ probe="${probe}"'s.remove();return w})()'
 w="$(value eval "$probe")"
 awk -v w="$w" 'BEGIN { exit !(w + 0 > 50) }'; check "text has real width (fonts present)" "$?" "width=${w}"
 
-$ENGINE exec "$NAME" anoa screenshot /tmp/shot.png >/dev/null 2>&1
+$ENGINE exec "$NAME" anoa screenshot /tmp/shot.png --token "$tok" >/dev/null 2>&1
 $ENGINE exec "$NAME" sh -c 'test -s /tmp/shot.png && head -c4 /tmp/shot.png | od -An -tx1 | tr -d " \n" | grep -q 89504e47'
 check "screenshot is a real PNG" "$?"
 

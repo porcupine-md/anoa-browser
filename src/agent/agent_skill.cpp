@@ -447,35 +447,28 @@ const char kIndex[] = R"(core       the workflow: start a browser, snapshot, act
 commands   every command, with its arguments
 )";
 
-QTextStream &out()
-{
-    static QTextStream s(stdout);
-    return s;
-}
-
 } // namespace
 
-int runSkillsCommand(const QStringList &args)
+int runSkillsCommand(const QStringList &args, QTextStream &out, QTextStream &err)
 {
-    QTextStream err(stderr);
-
     if (args.isEmpty() || args.first() == QStringLiteral("list")) {
-        out() << QLatin1String(kIndex);
+        out << QLatin1String(kIndex);
         return 0;
     }
-    if (args.first() == QStringLiteral("get")) {
-        const QString name = args.size() > 1 ? args.at(1) : QStringLiteral("core");
-        if (name == QStringLiteral("core")) {
-            out() << QLatin1String(kCore);
-            return 0;
-        }
-        if (name == QStringLiteral("commands")) {
-            out() << QLatin1String(kCommands);
-            return 0;
-        }
-        err << "anoa: no skill named '" << name << "' — try: anoa skills list" << Qt::endl;
-        return 1;
+    // A bare name is `get <name>`: browser_skills sends {"what":"core"} as the
+    // single argument "core", and without this the MCP door to the workflow
+    // answered every call with a usage error.
+    const QString name = args.first() == QStringLiteral("get")
+        ? (args.size() > 1 ? args.at(1) : QStringLiteral("core"))
+        : args.first();
+    if (name == QStringLiteral("core")) {
+        out << QLatin1String(kCore);
+        return 0;
     }
-    err << "anoa: usage: anoa skills list | anoa skills get core" << Qt::endl;
-    return 2;
+    if (name == QStringLiteral("commands")) {
+        out << QLatin1String(kCommands);
+        return 0;
+    }
+    err << "anoa: no skill named '" << name << "' — try: anoa skills list" << Qt::endl;
+    return 1;
 }

@@ -187,6 +187,21 @@ describe('MCP endpoint', () => {
     expect(body.result.content[0].text.length).toBeGreaterThan(20);
   });
 
+  // MCP-16: the workflow an agent is told to read in `instructions`. The tool
+  // used to send "core" where the command wanted "get core", and answered
+  // every call with a usage error; then it printed to the server's stdout and
+  // answered "ok".
+  it('browser_skills hands out the workflow and the reference', async () => {
+    const init = await rpc({ jsonrpc: '2.0', id: ++id, method: 'initialize', params: {} });
+    expect(init.body.result.instructions).toMatch(/browser_skills/);
+    for (const [what, heading] of [['core', 'Driving a browser'], ['commands', 'browser_']]) {
+      const { body } = await call('browser_skills', { what });
+      expect(body.result.isError).toBeUndefined();
+      expect(body.result.content[0].text).toContain(heading);
+      expect(body.result.content[0].text.length).toBeGreaterThan(2000);
+    }
+  });
+
   // MCP-12: no Origin is a client, not a page. A page in someone's browser can
   // reach localhost through DNS rebinding, and the only thing separating the
   // two is this header — which matters most in the default configuration,
@@ -239,6 +254,16 @@ describe('MCP endpoint with --auth-token', () => {
 
     const wrong = await rpc(list, { token: 'not-it' });
     expect(wrong.status).toBe(401);
+  });
+
+  // MCP-17: /setup is how someone holding only a URL and a token from the log
+  // finds the rest, so it answers without the token. It must carry none.
+  it('serves /setup without the token, and nothing else', async () => {
+    const setup = await fetch(`${BASE_URL}/setup`);
+    expect(setup.status).toBe(200);
+    expect(setup.headers.get('content-type')).toMatch(/text\/html/);
+    expect(await setup.text()).not.toContain(TOKEN);
+    expect((await fetch(`${BASE_URL}/json/version`)).status).toBe(401);
   });
 
   // MCP-14: an origin named with --embed-origin is allowed through.

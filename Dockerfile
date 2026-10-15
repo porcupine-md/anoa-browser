@@ -111,8 +111,9 @@ WORKDIR /home/anoa
 
 EXPOSE 9222
 
-# Listening on all interfaces so `-p 9222:9222` reaches it. The endpoint is
-# unauthenticated by default; pass --auth-token to require a bearer token, and
-# do not publish the port to an untrusted network without one.
+# Listening on all interfaces so `-p 9222:9222` reaches it, which is why it is
+# never unauthenticated by default: `--auth-token auto` makes a fresh token at
+# every start and prints it, with a /setup URL that has it filled in, as the
+# first `anoa:` lines of `docker logs`. Pass your own --auth-token to pin one.
 ENTRYPOINT ["anoa"]
-CMD ["--headless", "--no-sandbox", "--port", "9222"]
+CMD ["--headless", "--no-sandbox", "--port", "9222", "--auth-token", "auto"]

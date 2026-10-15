@@ -1588,7 +1588,7 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
     // `skills` never touches the browser: an agent asks for it before it has
     // started one, which is the whole point of a discovery stub.
     if (verb == QStringLiteral("skills"))
-        return runSkillsCommand(args);
+        return runSkillsCommand(args, out(), err());
 
     // Where to attach. Read from the command's own arguments rather than from
     // Config, because the verb took the rest of the line with it and
@@ -1800,7 +1800,7 @@ int agentSessionRun(AgentSession *session, const QString &verb, QStringList args
         // the same short circuit runAgentCommand makes, kept here so a caller
         // does not have to know which verbs need a connection.
         if (verb == QStringLiteral("skills"))
-            rc = runSkillsCommand(args);
+            rc = runSkillsCommand(args, out(), err());
         else if (verb == QStringLiteral("exec"))
             rc = cmdExec(session->session, args, json, session->host, session->port);
         else

@@ -11,6 +11,10 @@
 
 #include <QStringList>
 
+class QTextStream;
+
 // Handles `list` and `get <name>`. Returns the process exit code and never
 // touches the browser — an agent asks for this before starting one.
-int runSkillsCommand(const QStringList &args);
+// Writes to the caller's streams, so the MCP door gets the text instead of
+// the server's stdout.
+int runSkillsCommand(const QStringList &args, QTextStream &out, QTextStream &err);
