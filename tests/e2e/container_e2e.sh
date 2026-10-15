@@ -104,12 +104,21 @@ inside wait --url iana >/dev/null
 url="$(value eval 'location.href')"
 echo "$url" | grep -q 'iana.org'; check "click navigates" "$?" "$url"
 
-# Fonts. A container without one renders text as boxes, which looks like a
-# broken browser rather than a missing package — so check the page measured
-# some actual text rather than trusting that it drew.
-inside open example.com >/dev/null
-w="$(value eval 'document.querySelector("h1").getBoundingClientRect().width')"
-awk -v w="$w" 'BEGIN { exit !(w + 0 > 50) }'; check "text has real width (fonts present)" "$?" "h1 width=${w}"
+# Fonts. A container without one measures text as zero width — the glyphs are
+# not there to measure — which looks like a broken browser rather than a
+# missing package.
+#
+# Measure a span this test creates, not a page it fetched. The old check read
+# example.com's <h1>; example.com was redesigned without one, querySelector
+# returned null, and this failed on markup nobody here controls. It is kept
+# off-screen and removed again so the screenshot check below sees the page as
+# it was.
+probe='(()=>{const s=document.createElement("span");s.textContent="Example Domain";'
+probe="${probe}"'s.style.cssText="font:32px sans-serif;position:absolute;left:-9999px";'
+probe="${probe}"'document.body.appendChild(s);const w=s.getBoundingClientRect().width;'
+probe="${probe}"'s.remove();return w})()'
+w="$(value eval "$probe")"
+awk -v w="$w" 'BEGIN { exit !(w + 0 > 50) }'; check "text has real width (fonts present)" "$?" "width=${w}"
 
 $ENGINE exec "$NAME" anoa screenshot /tmp/shot.png >/dev/null 2>&1
 $ENGINE exec "$NAME" sh -c 'test -s /tmp/shot.png && head -c4 /tmp/shot.png | od -An -tx1 | tr -d " \n" | grep -q 89504e47'
