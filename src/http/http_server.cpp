@@ -341,6 +341,20 @@ void HttpServer::handleNewConnection()
         return;
     }
 
+    // The setup guide is ahead of the auth check: it is how someone holding only
+    // a URL and a token from the log finds out what to do with them. It carries
+    // no secret — every URL on it is built in the reader's browser from
+    // location.origin and the token they bring.
+    if (method == QLatin1String("GET") && path == QLatin1String("/setup")) {
+        QFile page(QStringLiteral(":/setup.html"));
+        if (!page.open(QIODevice::ReadOnly)) {
+            sendResponse(socket, 500, "Internal Server Error", "setup page missing", "text/plain");
+            return;
+        }
+        sendResponse(socket, 200, "OK", page.readAll(), "text/html; charset=utf-8");
+        return;
+    }
+
     if (!m_authToken.isEmpty()) {
         QString authHeader = headers.value(QStringLiteral("authorization"));
         bool viaBearer = authHeader.startsWith(QStringLiteral("Bearer "), Qt::CaseInsensitive)

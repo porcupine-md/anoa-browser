@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QIcon>
+#include <QRandomGenerator>
 #include <QString>
 #include <QStringList>
 #include <QTextStream>
@@ -322,6 +323,14 @@ int main(int argc, char *argv[])
     app.setWindowIcon(QIcon(QStringLiteral(":/anoa.png")));
 
     Config config = parseArgs(argc, argv);
+    // `--auth-token auto`: a container or sandbox has nowhere to hand a secret
+    // in from, so the browser makes its own and says it in the log below.
+    if (config.authToken == QLatin1String("auto")) {
+        quint32 words[6];
+        QRandomGenerator::system()->fillRange(words);
+        config.authToken = QString::fromLatin1(
+            QByteArray(reinterpret_cast<const char *>(words), sizeof words).toHex());
+    }
 
     AnoaBrowser browser(config);
     if (!config.profileName.isEmpty())
@@ -378,6 +387,20 @@ int main(int argc, char *argv[])
     if (!cdpProxy.start()) {
         qCritical("Failed to bind CDP proxy to port %u (already in use?)", wsPort);
         return 1;
+    }
+
+    // Where to go next, for whoever is reading the container or sandbox log:
+    // /setup lays out every URL with this token filled in. Printed with the
+    // token because the log is the only place a generated one exists.
+    {
+        const QString tokenQuery = config.authToken.isEmpty()
+            ? QString() : QStringLiteral("?token=") + config.authToken;
+        QTextStream err(stderr);
+        err << "anoa: setup  http://127.0.0.1:" << httpPort << "/setup" << tokenQuery << '\n'
+            << "anoa: mcp    http://127.0.0.1:" << httpPort << "/mcp" << '\n';
+        if (!config.authToken.isEmpty())
+            err << "anoa: token  " << config.authToken << '\n';
+        err.flush();
     }
 
 #ifndef Q_OS_WIN

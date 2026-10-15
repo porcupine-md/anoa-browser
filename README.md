@@ -235,15 +235,16 @@ QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu" anoa
 docker run --rm -p 9222:9222 ghcr.io/porcupine-md/anoa-browser
 ```
 
-Headless, no display server, no sandbox privileges needed. The CDP endpoint is
-on 9222, so Playwright and Puppeteer connect to it exactly as they would to a
-local browser. Drive it with the agent commands from inside the container:
+Headless, no display server, no sandbox privileges needed. It makes its own
+token at every start and logs it with a `/setup` link that lays out every URL
+and the MCP config for each code editor, token filled in:
 
 ```bash
 docker run -d --name anoa -p 9222:9222 ghcr.io/porcupine-md/anoa-browser
-docker exec anoa anoa open example.com
-docker exec anoa anoa snapshot -i
-docker exec anoa anoa click @e1
+docker logs anoa | grep '^anoa:'      # setup URL, MCP URL, token
+TOKEN=$(docker logs anoa 2>&1 | sed -n 's/^anoa: token  //p')
+docker exec anoa anoa open example.com --token "$TOKEN"
+docker exec anoa anoa snapshot -i --token "$TOKEN"
 ```
 
 Tags: a version (`v0.6.0`) for each release, `latest` for the newest release,
@@ -251,9 +252,9 @@ Tags: a version (`v0.6.0`) for each release, `latest` for the newest release,
 Dockerfile installs a published release rather than compiling, and takes
 `--build-arg ANOA_VERSION=v0.6.0` to pin one.
 
-The browser runs as a non-root user and the endpoint is **unauthenticated by
-default**. Pass `--auth-token` and do not publish the port to an untrusted
-network without one:
+The browser runs as a non-root user. Before v0.19.0 the image was
+**unauthenticated by default**; it is now `--auth-token auto`. Pin a token of
+your own by passing the command line yourself:
 
 ```bash
 docker run --rm -p 9222:9222 ghcr.io/porcupine-md/anoa-browser \
@@ -403,6 +404,24 @@ rather than holding a stream open forever.
   }
 }
 ```
+
+**`GET /setup`** is the same thing for a person: open it in a browser and it
+lists every URL this anoa answers on — MCP, CDP for Puppeteer and Playwright,
+the live view, screenshots — and the MCP config for Claude Code, Cursor, VS
+Code, Windsurf, opencode, Codex and Gemini CLI, each with the token filled in
+from `?token=`. It is the one path outside `--auth-token` and carries no secret:
+the page builds every URL in the reader's browser from its own address.
+`--auth-token auto` (the container image's default) makes a token at startup
+and logs it with the `/setup` link, so `docker logs` is all a user needs:
+
+```
+anoa: setup  http://127.0.0.1:9222/setup?token=5c1f…
+anoa: mcp    http://127.0.0.1:9222/mcp
+anoa: token  5c1f…
+```
+
+The server's `instructions` point an agent at `browser_skills` (`what: core`),
+which hands it the same workflow `anoa skills get core` prints.
 
 Every verb is a tool, named `browser_*`. A tool that fails comes back as a
 *result* with `isError` and the command's own message, not as a JSON-RPC error:

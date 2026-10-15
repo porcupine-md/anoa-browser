@@ -147,7 +147,10 @@ QJsonObject McpServer::dispatch(const QJsonObject &request, bool *isNotification
             "A real browser that outlives these calls. snapshot returns refs like @e2 "
             "that later calls target; clicks are hit-tested, so a button under a banner "
             "is reported rather than clicked through. Emulation set with browser_set "
-            "belongs to the tab and persists.");
+            "belongs to the tab and persists. Before driving a page, read the workflow "
+            "once: browser_skills with what=core (what=commands is the full reference). "
+            "It is written for the CLI; each `anoa <verb>` in it is the tool "
+            "browser_<verb> here.");
         return resultReply(id, result);
     }
 

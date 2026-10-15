@@ -7,5 +7,6 @@
 <RCC version="1.0">
   <qresource prefix="/">
     <file alias="viewer.html">viewer.html</file>
+    <file alias="setup.html">setup.html</file>
   </qresource>
 </RCC>

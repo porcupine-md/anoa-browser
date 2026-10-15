@@ -1,0 +1,213 @@
+<!doctype html>
+<!--
+  GET /setup: how to reach this browser, written against the URL it is being
+  read from. Served before the auth check, so it holds nothing secret: the
+  token arrives in the reader's own ?token= (or #token=) or the field below,
+  and every URL on the page is assembled here, in the browser, from
+  location.origin. That makes it right behind a proxy too, where the server
+  cannot know its public name (E2B serves port 9222 as https://9222-<id>.e2b.app).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>anoa setup</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1b1b; --muted:#666; --line:#e2e2e2; --code:#f5f5f4; --ok:#1a7f37; --bad:#c62828; --accent:#2f5bd3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141414; --fg:#e8e8e8; --muted:#9a9a9a; --line:#2c2c2c; --code:#1e1e1e; --ok:#4cc26b; --bad:#ef6b6b; --accent:#7c9bff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 36px 0 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+  p, li { color: var(--fg); }
+  .muted { color: var(--muted); }
+  code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 6px 0 0; }
+  pre button { position: absolute; top: 6px; right: 6px; font: 12px system-ui, sans-serif; padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; }
+  .token { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 16px 0 4px; }
+  .token input { flex: 1 1 280px; min-width: 0; padding: 8px 10px; font: 14px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 6px; background: var(--code); color: var(--fg); }
+  #state { font-size: 14px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  td { padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { width: 150px; color: var(--muted); }
+  td code { word-break: break-all; }
+  a { color: var(--accent); }
+  nav { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Connect to this anoa</h1>
+  <p class="muted">Every URL below is this browser's, with the token filled in. The token never leaves this page: it is read from <code>?token=</code> in the address bar or typed here.</p>
+
+  <div class="token">
+    <input id="token" placeholder="paste the token from the anoa log" autocomplete="off" spellcheck="false">
+  </div>
+  <div id="state" class="muted"></div>
+  <p class="muted" style="font-size:14px">Where the token comes from: the line <code>anoa: token ...</code> in the log of the container or machine running anoa (<code>docker logs &lt;container&gt;</code>, or <code>/tmp/anoa.log</code> in an E2B sandbox). An anoa started without <code>--auth-token</code> needs none.</p>
+
+  <nav>
+    <a href="#urls">URLs</a><a href="#claude">Claude Code</a><a href="#cursor">Cursor</a><a href="#vscode">VS Code</a>
+    <a href="#windsurf">Windsurf</a><a href="#opencode">opencode</a><a href="#codex">Codex</a><a href="#gemini">Gemini CLI</a><a href="#cdp">Puppeteer / Playwright</a>
+  </nav>
+
+  <h2 id="urls">URLs</h2>
+  <table>
+    <tr><td>MCP</td><td><code data-v="mcp"></code><br><span class="muted">POST JSON-RPC, <code>Authorization: Bearer &lt;token&gt;</code></span></td></tr>
+    <tr><td>CDP WebSocket</td><td><code data-v="cdp"></code><br><span class="muted">for Puppeteer and Playwright</span></td></tr>
+    <tr><td>Live view</td><td><a data-href="render" target="_blank"><code data-v="render"></code></a></td></tr>
+    <tr><td>Screenshot</td><td><a data-href="shot" target="_blank"><code data-v="shot"></code></a></td></tr>
+    <tr><td>Version</td><td><a data-href="version" target="_blank"><code data-v="version"></code></a></td></tr>
+    <tr><td>Tabs</td><td><a data-href="list" target="_blank"><code data-v="list"></code></a></td></tr>
+    <tr><td>This page</td><td><code data-v="self"></code></td></tr>
+  </table>
+
+  <h2>MCP in a code editor</h2>
+  <p class="muted">Every anoa command is an MCP tool named <code>browser_*</code>. Pick your editor, paste, restart it.</p>
+
+  <h3 id="claude">Claude Code</h3>
+  <p class="muted">For every project; drop <code>--scope user</code> for this one only.</p>
+  <pre data-s="claude"></pre>
+  <p class="muted">Or shared with a team in <code>.mcp.json</code> at the project root, with the token kept out of git in <code>ANOA_TOKEN</code>:</p>
+  <pre data-s="claudejson"></pre>
+
+  <h3 id="cursor">Cursor</h3>
+  <p class="muted"><code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project)</p>
+  <pre data-s="cursor"></pre>
+
+  <h3 id="vscode">VS Code (Copilot agent mode)</h3>
+  <p class="muted"><code>.vscode/mcp.json</code></p>
+  <pre data-s="vscode"></pre>
+
+  <h3 id="windsurf">Windsurf</h3>
+  <p class="muted"><code>~/.codeium/windsurf/mcp_config.json</code></p>
+  <pre data-s="windsurf"></pre>
+
+  <h3 id="opencode">opencode</h3>
+  <p class="muted"><code>opencode.json</code> in the project, or <code>~/.config/opencode/opencode.json</code></p>
+  <pre data-s="opencode"></pre>
+
+  <h3 id="codex">Codex CLI</h3>
+  <p class="muted"><code>~/.codex/config.toml</code>, with the token in the environment</p>
+  <pre data-s="codex"></pre>
+
+  <h3 id="gemini">Gemini CLI</h3>
+  <p class="muted"><code>~/.gemini/settings.json</code></p>
+  <pre data-s="gemini"></pre>
+
+  <h3>Check it by hand</h3>
+  <pre data-s="curl"></pre>
+
+  <h2 id="cdp">Puppeteer / Playwright</h2>
+  <pre data-s="puppeteer"></pre>
+  <pre data-s="playwright"></pre>
+</main>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var hash = new URLSearchParams(location.hash.slice(1));
+  var input = document.getElementById('token');
+  input.value = params.get('token') || hash.get('token') || '';
+
+  var origin = location.origin;
+  var wsScheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // The CDP proxy is on port+2. On a plain host that is another port; behind
+  // E2B's proxy each port is its own hostname, "<port>-<sandbox>.<domain>".
+  function cdpHost() {
+    var port = location.port ? Number(location.port) : NaN;
+    if (!isNaN(port)) return location.hostname + ':' + (port + 2);
+    var m = /^(\d+)-(.+)$/.exec(location.hostname);
+    if (m) return (Number(m[1]) + 2) + '-' + m[2];
+    return location.host;
+  }
+  var cdpPath = '/devtools/browser';
+  var checkSeq = 0;
+
+  function q(t) { return t ? '?token=' + encodeURIComponent(t) : ''; }
+  function json(o) { return JSON.stringify(o, null, 2); }
+
+  function render() {
+    var t = input.value.trim();
+    var mcp = origin + '/mcp';
+    var bearer = 'Bearer ' + (t || '<token>');
+    var headers = t ? { Authorization: bearer } : undefined;
+    var cdp = wsScheme + '//' + cdpHost() + cdpPath + q(t);
+    var v = {
+      mcp: mcp, cdp: cdp,
+      render: origin + '/render' + q(t),
+      shot: origin + '/render/screenshot.png' + q(t),
+      version: origin + '/json/version' + q(t),
+      list: origin + '/json/list' + q(t),
+      self: origin + '/setup' + q(t)
+    };
+    var hdr = t ? ' \\\n  --header "Authorization: ' + bearer + '"' : '';
+    var s = {
+      claude: 'claude mcp add --transport http --scope user anoa ' + mcp + hdr,
+      claudejson: json({ mcpServers: { anoa: { type: 'http', url: mcp,
+                         headers: t ? { Authorization: 'Bearer ${ANOA_TOKEN}' } : undefined } } }),
+      cursor: json({ mcpServers: { anoa: { url: mcp, headers: headers } } }),
+      vscode: json({ servers: { anoa: { type: 'http', url: mcp, headers: headers } } }),
+      windsurf: json({ mcpServers: { anoa: { serverUrl: mcp, headers: headers } } }),
+      opencode: json({ $schema: 'https://opencode.ai/config.json',
+                       mcp: { anoa: { type: 'remote', url: mcp, enabled: true, headers: headers } } }),
+      codex: '[mcp_servers.anoa]\nurl = "' + mcp + '"' + (t ? '\nbearer_token_env_var = "ANOA_TOKEN"\n\n# in your shell:\n# export ANOA_TOKEN=' + t : ''),
+      gemini: json({ mcpServers: { anoa: { httpUrl: mcp, headers: headers } } }),
+      curl: 'curl -s ' + mcp + (t ? " \\\n  -H 'Authorization: " + bearer + "'" : '') +
+            " \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'",
+      puppeteer: "import puppeteer from 'puppeteer-core'\n\nconst browser = await puppeteer.connect({\n  browserWSEndpoint: '" + cdp + "',\n})\nconst [page] = await browser.pages()",
+      playwright: "import { chromium } from 'playwright'\n\nconst browser = await chromium.connectOverCDP('" + cdp + "')\nconst page = browser.contexts()[0].pages()[0]"
+    };
+    document.querySelectorAll('[data-v]').forEach(function (el) { el.textContent = v[el.dataset.v]; });
+    document.querySelectorAll('[data-href]').forEach(function (el) { el.href = v[el.dataset.href]; });
+    document.querySelectorAll('pre[data-s]').forEach(function (el) {
+      el.textContent = s[el.dataset.s];
+      var b = document.createElement('button');
+      b.textContent = 'copy';
+      b.onclick = function () {
+        navigator.clipboard.writeText(s[el.dataset.s]).then(function () { b.textContent = 'copied'; },
+                                                             function () { b.textContent = 'select it'; });
+      };
+      el.appendChild(b);
+    });
+  }
+
+  // Asks the server whether the token opens anything, and takes the real
+  // browser id for the CDP URL from the answer while it is there.
+  function check() {
+    var t = input.value.trim();
+    var seq = ++checkSeq;
+    var state = document.getElementById('state');
+    fetch('/json/version' + q(t)).then(function (r) {
+      if (seq !== checkSeq) return;
+      if (r.status === 401) {
+        state.className = 'bad';
+        state.textContent = t ? 'This token is not accepted.' : 'This anoa requires a token.';
+        return;
+      }
+      return r.json().then(function (info) {
+        if (seq !== checkSeq) return;
+        var m = /\/devtools\/browser\/[^?]*/.exec(info.webSocketDebuggerUrl || '');
+        if (m) cdpPath = m[0];
+        state.className = 'ok';
+        state.textContent = (t ? 'Token accepted' : 'No token needed') + ' — ' + (info.Browser || 'anoa');
+        render();
+      });
+    }).catch(function () {
+      if (seq !== checkSeq) return;
+      state.className = 'bad';
+      state.textContent = 'Could not reach /json/version.';
+    });
+  }
+
+  input.addEventListener('input', function () { render(); check(); });
+  render();
+  check();
+})();
+</script>
+</body>
+</html>

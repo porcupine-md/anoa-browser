@@ -28,7 +28,8 @@ const Group kGroups[] = {
     --profile <name>                named profile: its own cookies and storage
     --profile-dir <dir>             where profiles live
     --extension <path>              load an unpacked extension (repeatable)
-    --auth-token <secret>           require this bearer token on CDP
+    --auth-token <secret>           require this bearer token on CDP;
+                                    `auto` makes one and logs it
     --embed-origin <origin>         let this origin iframe the live view at
                                     /render (repeatable; default same-origin)
     --download-dir <dir>            where downloads land (default: Downloads)
