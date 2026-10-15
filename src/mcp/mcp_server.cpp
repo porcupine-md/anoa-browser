@@ -6,6 +6,8 @@
 #include <QJsonParseError>
 #include <QTemporaryDir>
 
+#include <memory>
+
 #include "agent/agent_cli.h"
 #include "mcp/mcp_tools.h"
 
@@ -78,18 +80,7 @@ McpServer::McpServer(const QString &host, int port, const QString &token)
 {
 }
 
-McpServer::~McpServer()
-{
-    if (m_session)
-        agentSessionClose(m_session);
-}
-
-AgentSession *McpServer::session(QString *why)
-{
-    if (!m_session)
-        m_session = agentSessionOpen(m_host, m_port, m_token, why);
-    return m_session;
-}
+McpServer::~McpServer() = default;
 
 QByteArray McpServer::handle(const QByteArray &body, int *httpStatus)
 {
@@ -223,8 +214,14 @@ QJsonObject McpServer::callTool(const QJsonObject &params)
     if (!mcpArgvFor(*tool, args, &argv, &mapError))
         return rpcError(InvalidParams, mapError);
 
+    // A fresh attach per call, exactly as each CLI command makes one: it is
+    // what makes "the active tab" mean the tab that is active now. A session
+    // kept from the first call stayed on whatever tab was active then, so a
+    // browser_tab select was followed by reads of the tab it had left.
     QString why;
-    AgentSession *handle = session(&why);
+    const QString tab = args.value(QStringLiteral("tab")).toString();
+    std::unique_ptr<AgentSession, void (*)(AgentSession *)> handle(
+        agentSessionOpen(m_host, m_port, m_token, &why, tab), agentSessionClose);
     if (!handle) {
         return rpcError(ServerError,
                         QStringLiteral("cannot reach this browser: ") + why);
@@ -248,7 +245,7 @@ QJsonObject McpServer::callTool(const QJsonObject &params)
     }
 
     QString outText, errText;
-    const int rc = agentSessionRun(handle, tool->verb, argv, /*json=*/false,
+    const int rc = agentSessionRun(handle.get(), tool->verb, argv, /*json=*/false,
                                    &outText, &errText);
 
     if (rc != 0) {

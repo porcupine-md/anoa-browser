@@ -41,11 +41,13 @@ int runAgentCommand(const Config &config, const QString &verb, const QStringList
 class AgentSession;
 
 // Null on failure, with `why` set to something a caller can show a user.
+// `tabId` is what --tab names; empty means the active tab, as on the CLI.
 AgentSession *agentSessionOpen(const QString &host, int port, const QString &token,
-                               QString *why);
+                               QString *why, const QString &tabId = QString());
 void agentSessionClose(AgentSession *session);
 
 // Runs one verb and captures what it printed. Returns the same exit code the
-// command line would have produced: 0 ok, 1 failed, 2 usage.
+// command line would have produced: 0 ok, 1 failed, 2 usage. A `--json` in
+// `args` counts as `json`, the same as on a command line.
 int agentSessionRun(AgentSession *session, const QString &verb, QStringList args,
                     bool json, QString *outText, QString *errText);
