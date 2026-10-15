@@ -70,8 +70,11 @@ RUN set -eux; \
         *) echo "no published bundle for TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     if [ "${ANOA_VERSION}" = "latest" ]; then \
+        # No -m1: it closes the pipe on the first match and curl exits 23
+        # writing the remainder. Harmless under sh, fatal under pipefail —
+        # which is exactly how this broke in container.yml.
         version="$(curl -fsSL https://api.github.com/repos/porcupine-md/anoa-browser/releases/latest \
-                   | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"; \
+                   | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"; \
     else \
         version="${ANOA_VERSION}"; \
     fi; \
