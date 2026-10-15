@@ -308,6 +308,21 @@ else
   assert_fail "TERM-MODE-05: exit $CLI_CODE, output: $(head -c 200 <<<"$CLI_OUT")"
 fi
 
+# NO-DISPLAY: bare `anoa` over SSH used to qFatal inside QApplication, which the
+# shell reports as "Aborted (core dumped)" (exit 134). macOS always has a
+# display, so the guard is not compiled there.
+echo "=== NO-DISPLAY: a window with no display exits 1, not SIGABRT ==="
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "  SKIP  NO-DISPLAY: macOS"
+else
+  run_cli env -u DISPLAY -u WAYLAND_DISPLAY -u QT_QPA_PLATFORM "$BINARY" --port 9330
+  if [ "$CLI_CODE" -eq 1 ] && grep -q "try --headless" <<<"$CLI_OUT"; then
+    assert_pass "NO-DISPLAY: exits 1 and points at --headless"
+  else
+    assert_fail "NO-DISPLAY: exit $CLI_CODE, output: $(head -c 200 <<<"$CLI_OUT")"
+  fi
+fi
+
 # Summary
 echo ""
 echo "Port Layout Tests: $PASS passed, $FAIL failed"

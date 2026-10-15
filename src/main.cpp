@@ -300,6 +300,19 @@ int main(int argc, char *argv[])
 #endif
     }
 
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+    // A window over SSH: no display to put it on, so QApplication below
+    // qFatal()s on "could not load the Qt platform plugin xcb" and the shell
+    // reports "Aborted (core dumped)" — read as anoa crashing, when it was
+    // asked for a window it could never open. QT_QPA_PLATFORM set by hand
+    // (or by --headless above) means the caller already chose a platform.
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM") && qEnvironmentVariableIsEmpty("DISPLAY")
+        && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
+        QTextStream(stderr) << "anoa: no display to open a window on (try --headless)" << Qt::endl;
+        return 1;
+    }
+#endif
+
     QApplication app(argc, argv);
     app.setApplicationVersion(QStringLiteral(ANOA_VERSION));
     // Read from the binary's own resources, so it is there wherever the bundle
