@@ -17,8 +17,6 @@
 #include <QJsonObject>
 #include <QString>
 
-class AgentSession;
-
 class McpServer
 {
 public:
@@ -40,15 +38,9 @@ public:
 private:
     QJsonObject dispatch(const QJsonObject &request, bool *isNotification);
     QJsonObject callTool(const QJsonObject &params);
-    // Opens the connection to this browser on first use. It cannot happen in
-    // the constructor: the HTTP server is built before the CDP proxy is
-    // listening, so an attach there would always fail.
-    AgentSession *session(QString *why);
-
     QString m_host;
     int m_port;
     QString m_token;
-    AgentSession *m_session = nullptr;
     // One command at a time. Each runs a nested event loop, and a second
     // request entering that loop would interleave two commands on one
     // connection.

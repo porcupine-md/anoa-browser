@@ -428,6 +428,10 @@ Every verb is a tool, named `browser_*`. A tool that fails comes back as a
 the protocol reserves those for calls it could not parse, and a model needs to
 read a failure to act on it.
 
+Every form the CLI documents has a tool form, and `tests/integration/mcp_parity.test.js`
+runs each one both ways and wants the same answer. Every page tool takes `tab`
+(an id or a name), as every command takes `--tab`, and `json: true` is `--json`.
+
 It runs commands against this browser the same way the CLI does, so a tab,
 a ref from `browser_snapshot` and an override from `browser_set` are the same
 objects either surface sees. One call at a time — each occupies the connection,

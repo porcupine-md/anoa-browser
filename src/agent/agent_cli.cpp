@@ -119,6 +119,26 @@ public:
 
     CdpResult call(const QString &method, const QJsonObject &params = QJsonObject())
     {
+        // Input sent before the page has produced a frame is acknowledged and
+        // then dropped: `open` returning on the load event is not the same as
+        // the renderer routing input. A separate process per command used to
+        // hide it — spawning one took long enough — and `exec`, or MCP, which
+        // run the next command at once, lost two clicks in three. Two
+        // animation frames is the page having painted; the timeout covers a
+        // hidden tab, where they never come.
+        if (method.startsWith(QLatin1String("Input."))) {
+            QJsonObject frame;
+            frame[QStringLiteral("expression")] = QStringLiteral(
+                "new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r));"
+                " setTimeout(r, 250); })");
+            frame[QStringLiteral("awaitPromise")] = true;
+            send(QStringLiteral("Runtime.evaluate"), frame);
+        }
+        return send(method, params);
+    }
+
+    CdpResult send(const QString &method, const QJsonObject &params)
+    {
         QEventLoop loop;
         CdpResult result;
         m_client->send(method, params, [&](const CdpResult &r) {
@@ -1011,7 +1031,10 @@ int cmdPdf(Session &s, QStringList args)
 
 int cmdCookies(Session &s, QStringList args, bool json)
 {
-    const QString action = args.isEmpty() ? QStringLiteral("get") : args.takeFirst();
+    QString action = args.isEmpty() ? QStringLiteral("get") : args.takeFirst();
+    // `list` is what tab and skills call it, and what browser_cookies sends.
+    if (action == QStringLiteral("list"))
+        action = QStringLiteral("get");
 
     if (action == QStringLiteral("clear")) {
         const CdpResult r = s.call(QStringLiteral("Network.clearBrowserCookies"));
@@ -1076,7 +1099,8 @@ int cmdStorage(Session &s, QStringList args, bool json)
 
     QString action = QStringLiteral("get"), key, value;
     if (!args.isEmpty()) {
-        if (args.first() == QStringLiteral("set") || args.first() == QStringLiteral("clear")
+        if (args.first() == QStringLiteral("get") || args.first() == QStringLiteral("set")
+            || args.first() == QStringLiteral("clear")
             || args.first() == QStringLiteral("remove")) {
             action = args.takeFirst();
         }
@@ -1361,6 +1385,11 @@ int cmdMouse(Session &s, QStringList args)
     if (args.isEmpty())
         return fail(QStringLiteral("mouse takes move, down, up or wheel"), Usage);
     const QString action = args.takeFirst();
+    // `--dy` is the same distance as a flag, so a caller that names its
+    // arguments (browser_mouse) need not know it comes first.
+    const QString dyFlag = takeOption(args, QStringLiteral("--dy"));
+    if (!dyFlag.isEmpty())
+        args.prepend(dyFlag);
 
     QJsonObject p;
     if (action == QStringLiteral("wheel")) {
@@ -1764,12 +1793,12 @@ private:
 } // namespace
 
 AgentSession *agentSessionOpen(const QString &host, int port, const QString &token,
-                               QString *why)
+                               QString *why, const QString &tabId)
 {
     auto *handle = new AgentSession;
     handle->host = host;
     handle->port = port;
-    if (!handle->session.attach(host, port, token, 10000)) {
+    if (!handle->session.attach(host, port, token, 10000, tabId)) {
         if (why) {
             *why = handle->session.why().isEmpty()
                 ? QStringLiteral("no browser on %1:%2").arg(host).arg(port)
@@ -1791,6 +1820,10 @@ int agentSessionRun(AgentSession *session, const QString &verb, QStringList args
 {
     if (!session)
         return NoBrowser;
+    // The command line takes --json out before dispatch; a caller handing over
+    // argv (MCP) leaves it in, where every command would ignore it.
+    if (args.removeAll(QStringLiteral("--json")) > 0)
+        json = true;
 
     QString captured, capturedErr;
     int rc = Ok;

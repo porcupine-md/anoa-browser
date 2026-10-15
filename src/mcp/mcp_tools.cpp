@@ -56,6 +56,15 @@ QJsonObject schema(const QVector<QPair<QString, QJsonObject>> &properties,
 }
 
 // Shorthands for the arguments that recur across tools.
+// The value a positional takes when it is left out but a later one is given:
+// `storage local <key>` has no action word, and the table has to say which one
+// that means rather than drop the key.
+QJsonObject withDefault(QJsonObject o, const QString &value)
+{
+    o[QStringLiteral("default")] = value;
+    return o;
+}
+
 QJsonObject targetProp()
 {
     return prop(QStringLiteral("string"),
@@ -120,6 +129,9 @@ QVector<McpTool> buildTools()
                 {QStringLiteral("network_idle"), prop(QStringLiteral("boolean"),
                      QStringLiteral("Wait until no fetch or XHR is outstanding and none "
                                     "finished recently."))},
+                {QStringLiteral("network_idle_ms"), prop(QStringLiteral("integer"),
+                     QStringLiteral("How long quiet counts as quiet, with network_idle. "
+                                    "Default 500."))},
                 {QStringLiteral("download"), prop(QStringLiteral("boolean"),
                      QStringLiteral("Wait for downloads to finish. Returns at once when "
                                     "nothing is downloading."))},
@@ -134,6 +146,7 @@ QVector<McpTool> buildTools()
          {QStringLiteral("state"), QStringLiteral("--state")},
          {QStringLiteral("load"), QStringLiteral("--load")},
          {QStringLiteral("network_idle"), QStringLiteral("--network-idle")},
+         {QStringLiteral("network_idle_ms"), QStringLiteral("--network-idle-ms")},
          {QStringLiteral("download"), QStringLiteral("--download")},
          {QStringLiteral("timeout"), QStringLiteral("--timeout")}});
 
@@ -158,7 +171,7 @@ QVector<McpTool> buildTools()
                 {QStringLiteral("value"), prop(QStringLiteral("string"),
                      QStringLiteral("The role, text or selector to look for."))},
                 {QStringLiteral("nth"), prop(QStringLiteral("integer"),
-                     QStringLiteral("Return only the nth match, counting from 0."))},
+                     QStringLiteral("Return only the nth match, counting from 1."))},
                 {QStringLiteral("json"), jsonProp()}},
                {QStringLiteral("by"), QStringLiteral("value")}),
         {QStringLiteral("by"), QStringLiteral("value")}, {},
@@ -227,13 +240,20 @@ QVector<McpTool> buildTools()
         {QStringLiteral("key")});
 
     add(QStringLiteral("browser_scroll"), QStringLiteral("scroll"),
-        QStringLiteral("Scroll the page, or scroll an element into view."),
-        schema({{QStringLiteral("target"), targetProp()},
-                {QStringLiteral("dy"), prop(QStringLiteral("integer"),
-                     QStringLiteral("Angle-delta units; negative scrolls down, roughly 60 "
-                                    "page pixels per 120."))}}),
-        {QStringLiteral("target")}, {},
-        {{QStringLiteral("dy"), QStringLiteral("--dy")}});
+        QStringLiteral("Scroll the page. With nothing set, 400 pixels down."),
+        schema({{QStringLiteral("by"), prop(QStringLiteral("integer"),
+                     QStringLiteral("Pixels to scroll; negative scrolls up."))},
+                {QStringLiteral("up"), prop(QStringLiteral("boolean"),
+                     QStringLiteral("Scroll 400 pixels up instead of down."))},
+                {QStringLiteral("top"), prop(QStringLiteral("boolean"),
+                     QStringLiteral("Jump to the top."))},
+                {QStringLiteral("bottom"), prop(QStringLiteral("boolean"),
+                     QStringLiteral("Jump to the bottom."))}}),
+        {}, {},
+        {{QStringLiteral("by"), QStringLiteral("--by")},
+         {QStringLiteral("up"), QStringLiteral("--up")},
+         {QStringLiteral("top"), QStringLiteral("--top")},
+         {QStringLiteral("bottom"), QStringLiteral("--bottom")}});
 
     add(QStringLiteral("browser_mouse"), QStringLiteral("mouse"),
         QStringLiteral("Raw mouse input, for drags and hovers that click cannot express."),
@@ -245,9 +265,12 @@ QVector<McpTool> buildTools()
                 {QStringLiteral("x"), prop(QStringLiteral("integer"),
                      QStringLiteral("Logical pixels from the left."))},
                 {QStringLiteral("y"), prop(QStringLiteral("integer"),
-                     QStringLiteral("Logical pixels from the top."))}},
+                     QStringLiteral("Logical pixels from the top."))},
+                {QStringLiteral("dy"), prop(QStringLiteral("integer"),
+                     QStringLiteral("Wheel distance, for wheel; positive scrolls down."))}},
                {QStringLiteral("action")}),
-        {QStringLiteral("action"), QStringLiteral("x"), QStringLiteral("y")});
+        {QStringLiteral("action"), QStringLiteral("x"), QStringLiteral("y")}, {},
+        {{QStringLiteral("dy"), QStringLiteral("--dy")}});
 
     add(QStringLiteral("browser_upload"), QStringLiteral("upload"),
         QStringLiteral("Put files into a file input and fire its change event. A file "
@@ -276,28 +299,36 @@ QVector<McpTool> buildTools()
     // ── state ───────────────────────────────────────────────────────────────
     add(QStringLiteral("browser_cookies"), QStringLiteral("cookies"),
         QStringLiteral("Read, set or clear cookies for the current origin."),
-        schema({{QStringLiteral("action"), enumProp({QStringLiteral("list"),
-                                                     QStringLiteral("set"),
-                                                     QStringLiteral("clear")},
-                     QStringLiteral("What to do. Defaults to listing."))},
+        schema({{QStringLiteral("action"),
+                 withDefault(enumProp({QStringLiteral("list"),
+                                       QStringLiteral("set"),
+                                       QStringLiteral("clear")},
+                                      QStringLiteral("What to do. Defaults to listing.")),
+                             QStringLiteral("list"))},
                 {QStringLiteral("name"), prop(QStringLiteral("string"),
                      QStringLiteral("Cookie name, when setting."))},
                 {QStringLiteral("value"), prop(QStringLiteral("string"),
                      QStringLiteral("Cookie value, when setting."))},
+                {QStringLiteral("url"), prop(QStringLiteral("string"),
+                     QStringLiteral("Scope a set cookie to this URL instead of the page's."))},
                 {QStringLiteral("json"), jsonProp()}}),
         {QStringLiteral("action"), QStringLiteral("name"), QStringLiteral("value")}, {},
-        jsonFlag);
+        {{QStringLiteral("url"), QStringLiteral("--url")},
+         {QStringLiteral("json"), QStringLiteral("--json")}});
 
     add(QStringLiteral("browser_storage"), QStringLiteral("storage"),
         QStringLiteral("Read or change localStorage or sessionStorage."),
         schema({{QStringLiteral("area"), enumProp({QStringLiteral("local"),
                                                    QStringLiteral("session")},
                      QStringLiteral("Which store."))},
-                {QStringLiteral("action"), enumProp({QStringLiteral("get"),
-                                                     QStringLiteral("set"),
-                                                     QStringLiteral("remove"),
-                                                     QStringLiteral("clear")},
-                     QStringLiteral("What to do. Defaults to reading it all."))},
+                {QStringLiteral("action"),
+                 withDefault(enumProp({QStringLiteral("get"),
+                                       QStringLiteral("set"),
+                                       QStringLiteral("remove"),
+                                       QStringLiteral("clear")},
+                                      QStringLiteral("What to do. Defaults to reading: "
+                                                     "one key when key is given, else all.")),
+                             QStringLiteral("get"))},
                 {QStringLiteral("key"), prop(QStringLiteral("string"),
                      QStringLiteral("The key."))},
                 {QStringLiteral("value"), prop(QStringLiteral("string"),
@@ -344,27 +375,37 @@ QVector<McpTool> buildTools()
                                     "name."))},
                 {QStringLiteral("isolated"), prop(QStringLiteral("boolean"),
                      QStringLiteral("Give the new tab its own cookie jar."))},
+                {QStringLiteral("profile"), prop(QStringLiteral("string"),
+                     QStringLiteral("Give the new tab this named, persistent profile."))},
                 {QStringLiteral("json"), jsonProp()}},
                {QStringLiteral("action")}),
         {QStringLiteral("action"), QStringLiteral("target")}, {},
         {{QStringLiteral("name"), QStringLiteral("--name")},
          {QStringLiteral("isolated"), QStringLiteral("--isolated")},
+         {QStringLiteral("profile"), QStringLiteral("--profile")},
          {QStringLiteral("json"), QStringLiteral("--json")}});
 
     // ── debug ───────────────────────────────────────────────────────────────
     const auto recorded = [&](const QString &name, const QString &verb,
-                              const QString &description) {
-        add(name, verb, description,
-            schema({{QStringLiteral("clear"), prop(QStringLiteral("boolean"),
-                         QStringLiteral("Forget what has been recorded so far."))},
-                    {QStringLiteral("json"), jsonProp()}}),
-            {}, {},
-            {{QStringLiteral("clear"), QStringLiteral("--clear")},
-             {QStringLiteral("json"), QStringLiteral("--json")}});
+                              const QString &description, bool levels = false) {
+        QVector<QPair<QString, QJsonObject>> props{
+            {QStringLiteral("clear"), prop(QStringLiteral("boolean"),
+                 QStringLiteral("Forget what has been recorded so far."))},
+            {QStringLiteral("json"), jsonProp()}};
+        QVector<QPair<QString, QString>> flags{
+            {QStringLiteral("clear"), QStringLiteral("--clear")},
+            {QStringLiteral("json"), QStringLiteral("--json")}};
+        if (levels) {
+            props.append({QStringLiteral("level"), prop(QStringLiteral("string"),
+                              QStringLiteral("Only this level: log, info, warn, error, "
+                                             "debug."))});
+            flags.append({QStringLiteral("level"), QStringLiteral("--level")});
+        }
+        add(name, verb, description, schema(props), {}, {}, flags);
     };
     recorded(QStringLiteral("browser_console"), QStringLiteral("console"),
              QStringLiteral("What the page logged. Recorded inside the page, so it covers "
-                            "what happened before this call."));
+                            "what happened before this call."), /*levels=*/true);
     recorded(QStringLiteral("browser_errors"), QStringLiteral("errors"),
              QStringLiteral("Uncaught exceptions and unhandled rejections."));
     recorded(QStringLiteral("browser_network"), QStringLiteral("network"),
@@ -398,6 +439,19 @@ QVector<McpTool> buildTools()
         QStringLiteral("Stop the browser. Returns once the process is gone and the port "
                        "is free."),
         schema({}));
+
+    // --tab, which the CLI takes on every command that acts on a page. Not a
+    // flag in argv: McpServer attaches to the tab it names, as the CLI does.
+    const QStringList tabless{QStringLiteral("browser_tab"), QStringLiteral("browser_skills"),
+                              QStringLiteral("browser_close")};
+    for (McpTool &tool : t) {
+        if (tabless.contains(tool.name))
+            continue;
+        QJsonObject props = tool.inputSchema.value(QStringLiteral("properties")).toObject();
+        props[QStringLiteral("tab")] = prop(QStringLiteral("string"),
+            QStringLiteral("Act on this tab, by id or name. Defaults to the active tab."));
+        tool.inputSchema[QStringLiteral("properties")] = props;
+    }
 
     return t;
 }
@@ -440,10 +494,22 @@ bool mcpArgvFor(const McpTool &tool, const QJsonObject &args, QStringList *argv,
     // Positionals keep their order, and a gap ends the list: a command reads
     // argv by position, so emitting a later argument without an earlier one
     // would silently shift everything left.
-    for (const QString &key : tool.positional) {
-        if (!args.contains(key) || args.value(key).isNull())
-            break;
-        const QJsonValue v = args.value(key);
+    const QJsonObject props = tool.inputSchema.value(QStringLiteral("properties")).toObject();
+    const auto given = [&args](const QString &key) {
+        return args.contains(key) && !args.value(key).isNull();
+    };
+    for (int i = 0; i < tool.positional.size(); ++i) {
+        const QString &key = tool.positional.at(i);
+        QJsonValue v = args.value(key);
+        if (!given(key)) {
+            bool later = false;
+            for (int j = i + 1; j < tool.positional.size(); ++j)
+                later = later || given(tool.positional.at(j));
+            const QJsonValue fallback = props.value(key).toObject().value(QStringLiteral("default"));
+            if (!later || fallback.isUndefined())
+                break;
+            v = fallback;
+        }
         if (v.isArray()) {
             const QJsonArray items = v.toArray();
             for (const QJsonValue &item : items)
