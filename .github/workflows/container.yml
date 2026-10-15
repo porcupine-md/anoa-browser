@@ -58,6 +58,8 @@ jobs:
       # built is an image nobody can reproduce.
       - name: Resolve the anoa version
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           case "${{ github.event_name }}" in
@@ -69,8 +71,12 @@ jobs:
             *) v="latest" ;;
           esac
           if [ "$v" = "latest" ]; then
-            v="$(curl -fsSL https://api.github.com/repos/${{ github.repository }}/releases/latest \
-                 | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"
+            # Not `curl | grep -m1`: grep exits on the first match, curl dies
+            # writing the rest of the body, and pipefail made that exit 23 —
+            # every chained run since v0.7.0 failed here, before building
+            # anything. gh is on the runner and uses GITHUB_TOKEN, so this is
+            # also not subject to the unauthenticated rate limit.
+            v="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name)"
           fi
           [ -n "$v" ] || { echo "::error::could not resolve an anoa version"; exit 1; }
           echo "anoa=$v" >> "$GITHUB_OUTPUT"
