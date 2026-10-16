@@ -174,7 +174,12 @@ public:
     // So the flag is now a hint, confirmed by asking the page. Asking costs
     // one tiny round trip; re-sending the script would cost 16 KB, and cmdOpen
     // polls readyState up to 150 times while waiting for a load.
-    bool installScript()
+    //
+    // A failure says why (issue #64). "could not install the page helper" on
+    // its own told nobody whether the page was busy past the request timeout,
+    // mid-navigation, or threw — and those want different fixes. `why` gets
+    // the CDP error or the exception text.
+    bool installScript(QString *why = nullptr)
     {
         if (m_installed && helperIsPresent())
             return true;
@@ -182,9 +187,45 @@ public:
         QJsonObject boot;
         boot[QStringLiteral("expression")] = agentScript();
         boot[QStringLiteral("returnByValue")] = true;
-        const CdpResult r = call(QStringLiteral("Runtime.evaluate"), boot);
-        m_installed = r.ok;
-        return m_installed;
+        CdpResult r = call(QStringLiteral("Runtime.evaluate"), boot);
+        // A document that is still being replaced (a redirect, a client-side
+        // navigation right after load) loses its context under the evaluate.
+        // The next document is a moment away, so one retry is worth it.
+        if (!r.ok && isContextGone(r.errorMessage)) {
+            QEventLoop wait;
+            QTimer::singleShot(300, &wait, &QEventLoop::quit);
+            wait.exec();
+            r = call(QStringLiteral("Runtime.evaluate"), boot);
+        }
+        if (!r.ok) {
+            if (why)
+                *why = r.errorMessage;
+            return false;
+        }
+        // A thrown exception arrives as a successful reply. Counting it as an
+        // install left every later command failing with "__anoa is not
+        // defined" instead of saying what went wrong here.
+        const QJsonObject details =
+            r.result.value(QStringLiteral("exceptionDetails")).toObject();
+        if (!details.isEmpty()) {
+            if (why) {
+                const QJsonObject ex = details.value(QStringLiteral("exception")).toObject();
+                *why = ex.value(QStringLiteral("description")).toString(
+                    details.value(QStringLiteral("text")).toString(
+                        QStringLiteral("the helper script threw")));
+            }
+            return false;
+        }
+        m_installed = true;
+        return true;
+    }
+
+    static bool isContextGone(const QString &message)
+    {
+        return message.contains(QLatin1String("Execution context was destroyed"))
+            || message.contains(QLatin1String("Cannot find context"))
+            || message.contains(QLatin1String("Cannot find default execution context"))
+            || message.contains(QLatin1String("Inspected target navigated"));
     }
 
     // Does *this* document carry the current helper? Version, not mere
@@ -208,9 +249,13 @@ public:
 
     QJsonValue evaluate(const QString &expression, QString *error)
     {
-        if (!installScript()) {
-            if (error)
+        QString why;
+        if (!installScript(&why)) {
+            if (error) {
                 *error = QStringLiteral("could not install the page helper");
+                if (!why.isEmpty())
+                    *error += QStringLiteral(": ") + why;
+            }
             return QJsonValue();
         }
 
