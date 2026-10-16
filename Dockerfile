@@ -100,7 +100,13 @@ RUN set -eux; \
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-ENV QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox"
+# --disable-dev-shm-usage: Docker gives a container a 64 MB /dev/shm, and
+# Chromium keeps its renderer shared memory there. Heavy pages (github.com,
+# detik.com) exhaust it and the renderer stalls without crashing: the page
+# never finishes loading and every Runtime.evaluate times out, which agents
+# saw as "could not install the page helper" (issue #64). The flag moves that
+# memory to /tmp, so the image works without the user knowing --shm-size.
+ENV QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox --disable-dev-shm-usage"
 
 # Not root. Chromium refuses to start as root without --no-sandbox anyway, and
 # an image whose browser runs as root is a browser that renders untrusted pages
